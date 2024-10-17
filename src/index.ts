@@ -6,7 +6,7 @@ app.get("/", (c) => {
 	return c.text("API Home");
 });
 
-app.get("/api/gyms/stats/update", (c) => {
+app.get("/gyms/stats/update", (c) => {
 	return c.text("Hello Hono!");
 });
 
