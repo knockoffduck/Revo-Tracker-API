@@ -3,7 +3,6 @@ import { handleError, handleSuccess } from "./utils/handlers";
 import { insertData, parseHTML } from "./utils/parser";
 import { Gym } from "./utils/types";
 import { supabaseClient } from "./utils/supabaseClient";
-import { SupabaseClient } from "@supabase/supabase-js";
 
 const app = new Hono();
 
