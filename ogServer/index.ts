@@ -26,6 +26,7 @@ async function getGymDetails() {
 
 		// Find all divs with the attribute 'data-counter-card' (for gym info)
 		$("div[data-counter-card]").each((i, element) => {
+			console.log(typeof element);
 			const gymName = $(element).attr("data-counter-card"); // Extract the gym name from the attribute
 			const size = Number(
 				$(element)
