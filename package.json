@@ -4,6 +4,9 @@
     "dev": "bun run --hot src/index.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "axios": "^1.7.7",
+    "cheerio": "^1.0.0",
     "hono": "^4.6.5"
   },
   "devDependencies": {
