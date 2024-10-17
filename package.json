@@ -1,5 +1,5 @@
 {
-  "name": "Revo-Tracker-API",
+  "name": "revo-tracker-api",
   "scripts": {
     "dev": "bun run --hot src/index.ts"
   },

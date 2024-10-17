@@ -1,9 +1,16 @@
-import { Hono } from 'hono'
+import { Hono } from "hono";
 
-const app = new Hono()
+const app = new Hono();
 
-app.get('/', (c) => {
-  return c.text('Hello Hono!')
-})
+app.get("/", (c) => {
+	return c.text("API Home");
+});
 
-export default app
+app.get("/api/gyms/stats/update", (c) => {
+	return c.text("Hello Hono!");
+});
+
+export default {
+	port: 3001,
+	fetch: app.fetch,
+};
