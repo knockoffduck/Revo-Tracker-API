@@ -51,7 +51,7 @@ export const parseHTML = async () => {
 				member_count: memberCount,
 				member_ratio: memberAreaRatio,
 				percentage:
-					(1 - (memberAreaRatio > 50 ? 50 : memberAreaRatio) / 50) * 100,
+					(1 - (memberAreaRatio > 60 ? 60 : memberAreaRatio) / 60) * 100,
 			});
 		}
 	});
