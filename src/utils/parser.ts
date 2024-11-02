@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import { supabaseClient } from "./supabaseClient";
 import { SupabaseClient } from "@supabase/supabase-js";
 import { Gym } from "./types";
+import { file } from "bun";
 
 const fetchHTML = async () => {
 	try {
@@ -55,15 +56,31 @@ export const parseHTML = async () => {
 			});
 		}
 	});
-	console.log(gymData);
 	return gymData;
 };
 
 export const insertData = async (gymData: Gym[]) => {
-	const supabase = await supabaseClient();
+	const supabase = supabaseClient();
 	if (!(supabase instanceof SupabaseClient)) {
 		console.error("Unable to access Supabase client");
 		return;
+	}
+	const jsonFile = Bun.file("src/utils/gyms.json");
+	const GYMS: { name: string; size: number }[] = await jsonFile.json();
+
+	for (let i = 0; i < GYMS.length; i++) {
+		const currentGym = GYMS[i];
+		const exists = gymData.some((gym) => gym.name === currentGym.name);
+		if (!exists) {
+			console.log(`Gym ${currentGym.name} has 0 members`);
+			gymData.push({
+				name: currentGym.name,
+				size: currentGym.size,
+				member_count: 0,
+				member_ratio: 0,
+				percentage: 0,
+			});
+		}
 	}
 	const { data, error } = await supabase
 		.from("Revo Member Stats")
