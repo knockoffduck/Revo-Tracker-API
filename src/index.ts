@@ -38,41 +38,68 @@ app.get("/gyms/stats/update", async (c) => {
 });
 
 app.get("/gyms/stats/latest", async (c) => {
-	const supabase = await supabaseClient();
+	const supabase = supabaseClient();
 	if (!supabase) return handleError(c, "Cannot open Supabase");
 
 	try {
-		// Step 1: Get the latest entry
-		const latestEntry = await supabase
+		// Step 1: Get the latest `created_at` timestamp
+		const { data: latestEntry, error: latestError } = await supabase
 			.from("Revo Member Stats")
 			.select("created_at")
 			.order("created_at", { ascending: false })
 			.limit(1)
-			.single();
+			.single(); // Fetch the single latest entry
 
-		if (latestEntry.error) throw latestEntry.error;
+		if (latestError) throw latestError;
+		if (!latestEntry) throw new Error("No entries found in the database");
 
-		// Step 2: Filter entries with the same created_at
-		const latestCreatedAt = latestEntry.data.created_at;
+		const latestCreatedAt = latestEntry.created_at;
 
-		const filteredEntries = await supabase
+		// Step 2: Fetch all entries with the same latest `created_at` timestamp
+		const { data: filteredEntries, error: filteredError } = await supabase
 			.from("Revo Member Stats")
-			.select("name,size,member_count,member_ratio,percentage")
-			.order("percentage", { ascending: false })
-			.eq("created_at", latestCreatedAt);
+			.select("name, size, member_count, member_ratio, percentage, created_at")
+			.eq("created_at", latestCreatedAt) // Filter all entries with this timestamp
+			.order("percentage", { ascending: false }); // Order by percentage descending
 
-		if (filteredEntries.error) throw filteredEntries.error;
+		if (filteredError) throw filteredError;
 
 		const result = {
 			timestamp: latestCreatedAt,
-			data: filteredEntries.data,
+			data: filteredEntries, // Contains all entries with the same latest `created_at`
 		};
 
-		return handleSuccess(c, result); // Returns entries with the same created_at timestamp
+		return handleSuccess(c, result);
 	} catch (error) {
 		console.error("Error fetching entries:", error);
-		return handleError(c, error); // Handle errors as needed
+		return handleError(c, error);
 	}
+});
+
+app.get("/test", async (c) => {
+	const gymData = await parseHTML();
+	if (!gymData) return "error fetching gymdata";
+	gymData.pop();
+	const supabase = supabaseClient();
+	if (!supabase) return "Cannot access Supabase";
+	const jsonFile = Bun.file("src/utils/gyms.json");
+	const GYMS: { name: string; size: number }[] = await jsonFile.json();
+
+	for (let i = 0; i < GYMS.length; i++) {
+		const currentGym = GYMS[i];
+		const exists = gymData.some((gym) => gym.name === currentGym.name);
+		if (!exists) {
+			console.log(`Gym ${currentGym.name} has 0 members`);
+			gymData.push({
+				name: currentGym.name,
+				size: currentGym.size,
+				member_count: 0,
+				member_ratio: 0,
+				percentage: 0,
+			});
+		}
+	}
+	return handleSuccess(c, gymData);
 });
 
 export default {
