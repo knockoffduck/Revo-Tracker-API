@@ -2,6 +2,7 @@ import {
 	mysqlTable,
 	mysqlSchema,
 	AnyMySqlColumn,
+	foreignKey,
 	primaryKey,
 	varchar,
 	datetime,
@@ -9,7 +10,6 @@ import {
 	double,
 	text,
 	index,
-	foreignKey,
 	unique,
 	boolean,
 } from "drizzle-orm/mysql-core";
@@ -19,11 +19,14 @@ export const revoGymCount = mysqlTable(
 	"Revo_Gym_Count",
 	{
 		id: varchar({ length: 36 }).notNull(),
-		created: datetime({ mode: "string" }).notNull(),
+		created: datetime().notNull(),
 		count: int().notNull(),
 		ratio: double().notNull(),
 		gymName: text("gym_name").notNull(),
 		percentage: double(),
+		gymId: varchar("gym_id", { length: 36 })
+			.notNull()
+			.references(() => revoGyms.id),
 	},
 	(table) => [primaryKey({ columns: [table.id], name: "Revo_Gym_Count_id" })]
 );
