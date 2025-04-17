@@ -24,6 +24,7 @@ const isGym = (data: any): data is GymInfo => {
 
 // Type guard function to check if an array is of type Gym[]
 const isGymArray = (data: any): data is GymInfo[] => {
+	console.log(data);
 	return Array.isArray(data) && data.every(isGym);
 };
 
