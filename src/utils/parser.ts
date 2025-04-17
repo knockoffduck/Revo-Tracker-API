@@ -1,9 +1,57 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
-import { supabaseClient } from "./supabaseClient";
-import { SupabaseClient } from "@supabase/supabase-js";
-import { Gym } from "./types";
+import { GymInfo } from "./types";
 import { file } from "bun";
+import { db } from "./database";
+import { revoGyms } from "../db/schema";
+import { simpleIntegerHash } from "./tools";
+import { sql } from "drizzle-orm";
+import { add, get } from "cheerio/dist/commonjs/api/traversing";
+
+const options = {
+	method: "GET",
+	headers: {
+		"x-rapidapi-key": "a012f7acdamsh063c385ef42f07fp1d04f0jsnd06f98967540", // Replace with your actual API key
+		"x-rapidapi-host": "addressr.p.rapidapi.com",
+	},
+};
+
+const extractPostcode = (address: string) => {
+	const parts = address.replaceAll(",", "").split(" ");
+	let index = parts.length - 1;
+
+	while (index >= 0) {
+		const part = parts[index];
+		if (!isNaN(Number(part)) && part.length === 4) {
+			return Number(part);
+		}
+		index--;
+	}
+	if (address.includes("Cockburn")) {
+		return 6164; // Default postcode for Cockburn
+	}
+	return 0; // Default value if no postcode is found
+};
+const getStateFromPostcode = (postcode: number) => {
+	if (postcode >= 2000 && postcode <= 2599) return "NSW";
+	if (postcode >= 3000 && postcode <= 3999) return "VIC";
+	if (postcode >= 4000 && postcode <= 4999) return "QLD";
+	if (postcode >= 5000 && postcode <= 5799) return "SA";
+	if (postcode >= 5800 && postcode <= 5999) return "NT";
+	if (postcode >= 6000 && postcode <= 6999) return "WA";
+	if (postcode >= 7000 && postcode <= 7999) return "TAS";
+	if (postcode >= 8000 && postcode <= 8999) return "ACT";
+	return "Unknown State"; // Default value if no state is found
+};
+
+const extractState = (address: string) => {
+	// aus postcode to state
+	let postcode = extractPostcode(address);
+	if (postcode === 0) {
+		return "Unknown State"; // Default value if no postcode is found
+	}
+	return getStateFromPostcode(postcode);
+};
 
 const fetchHTML = async () => {
 	try {
@@ -23,10 +71,12 @@ export const parseHTML = async () => {
 
 	if ($ == undefined) return console.log("undefined HTML");
 
-	const gymData: Gym[] = [];
+	const gymData: GymInfo[] = [];
 
-	$("div[data-counter-card]").each((i, element) => {
+	$("div[data-counter-card]").map(async (i, element) => {
 		const name = $(element).attr("data-counter-card"); // Extract the gym name from the attribute
+		const address = $(element).find("[data-address] > span.is-h6").text(); // Extract the address from the attribute
+		if (!name || !address) return; // Skip if name or address is not found
 		const size = Number(
 			$(element)
 				.find("span.is-h6")
@@ -42,13 +92,18 @@ export const parseHTML = async () => {
 			$(`span[data-live-count="${name}"]`).text().trim()
 		); // Match gym with live member count
 
-		if (name && size && memberCount) {
+		if (name && size && memberCount && address) {
 			// Push the formatted object into the gymData array
 			const memberAreaRatio = size / memberCount;
 
+			const state = extractState(address); // Extract state from address
+
 			gymData.push({
 				name: name,
+				address: address,
+				postcode: extractPostcode(address), // Extract postcode from address
 				size: size, // Remove extra whitespaces from the size
+				state: state, // Extract state from address
 				member_count: memberCount,
 				member_ratio: memberAreaRatio,
 				percentage:
@@ -59,36 +114,89 @@ export const parseHTML = async () => {
 	return gymData;
 };
 
-export const insertData = async (gymData: Gym[]) => {
-	const supabase = supabaseClient();
-	if (!(supabase instanceof SupabaseClient)) {
-		console.error("Unable to access Supabase client");
-		return;
-	}
-	const jsonFile = Bun.file("src/utils/gyms.json");
-	const GYMS: { name: string; size: number }[] = await jsonFile.json();
-
-	for (let i = 0; i < GYMS.length; i++) {
-		const currentGym = GYMS[i];
-		const exists = gymData.some((gym) => gym.name === currentGym.name);
-		if (!exists) {
-			console.log(`Gym ${currentGym.name} has 0 members`);
-			gymData.push({
-				name: currentGym.name,
-				size: currentGym.size,
-				member_count: 0,
-				member_ratio: 0,
-				percentage: 0,
-			});
+export const updateGymInfo = async (gymData: GymInfo[]) => {
+	const currentTime = new Date();
+	gymData.map(async (gym) => {
+		if (gym.name === "Cockburn") {
+			console.log("Cockburn Gym");
 		}
-	}
-	const { data, error } = await supabase
-		.from("Revo Member Stats")
-		.insert(gymData)
-		.select();
-	if (error) {
-		console.error(error);
-		return 500;
-	}
-	return data;
+		const state = await extractState(gym.address);
+
+		console.log(
+			"Gym name:",
+			gym.name,
+			"State:",
+			state,
+			"Postcode:",
+			gym.postcode
+		);
+		const info = {
+			id: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
+			name: gym.name,
+			address: gym.address,
+			postcode: gym.postcode,
+			state: await extractState(gym.address),
+			areaSize: gym.size,
+			lastUpdated: currentTime,
+		};
+		await db
+			.insert(revoGyms)
+			.values(info)
+			.onDuplicateKeyUpdate({
+				set: {
+					name: sql`values(${revoGyms.name})`,
+					address: sql`values(${revoGyms.address})`,
+					postcode: sql`values(${revoGyms.postcode})`,
+					state: sql`values(${revoGyms.state})`,
+					areaSize: sql`values(${revoGyms.areaSize})`,
+					lastUpdated: sql`values(${revoGyms.lastUpdated})`,
+				},
+			});
+		console.log(
+			`Gym ${gym.name} with postcode ${gym.postcode} updated successfully`
+		);
+	});
+
+	return;
 };
+
+// const main = async () => {
+// 	const gymData = await parseHTML();
+// 	if (!gymData) return "error fetching gymdata";
+
+// 	return await updateGymInfo(gymData);
+// };
+
+// export const insertData = async (gymData: Gym[]) => {
+// 	// const supabase = supabaseClient();
+// 	// if (!(supabase instanceof SupabaseClient)) {
+// 	// 	console.error("Unable to access Supabase client");
+// 	// 	return;
+// 	// }
+// 	const jsonFile = Bun.file("src/utils/gyms.json");
+// 	const GYMS: { name: string; size: number }[] = await jsonFile.json();
+
+// 	for (let i = 0; i < GYMS.length; i++) {
+// 		const currentGym = GYMS[i];
+// 		const exists = gymData.some((gym) => gym.name === currentGym.name);
+// 		if (!exists) {
+// 			console.log(`Gym ${currentGym.name} has 0 members`);
+// 			gymData.push({
+// 				name: currentGym.name,
+// 				size: currentGym.size,
+// 				member_count: 0,
+// 				member_ratio: 0,
+// 				percentage: 0,
+// 			});
+// 		}
+// 	}
+// 	// const { data, error } = await supabase
+// 	// 	.from("Revo Member Stats")
+// 	// 	.insert(gymData)
+// 	// 	.select();
+// 	// if (error) {
+// 	// 	console.error(error);
+// 	// 	return 500;
+// 	// }
+// 	return GYMS;
+// };
