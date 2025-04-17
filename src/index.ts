@@ -1,7 +1,10 @@
 import { Hono } from "hono";
 import { handleError, handleSuccess } from "./utils/handlers";
-import { parseHTML, updateGymInfo } from "./utils/parser";
+import { insertGymStats, parseHTML, updateGymInfo } from "./utils/parser";
 import { GymInfo } from "./utils/types";
+import { db } from "./utils/database";
+import { revoGymCount } from "./db/schema";
+import { desc, eq } from "drizzle-orm";
 
 const app = new Hono();
 
@@ -38,51 +41,42 @@ app.get("/gyms/update", async (c) => {
 });
 
 app.get("/gyms/stats/update", async (c) => {
-	const data = await parseHTML();
-	if (!isGymArray(data)) {
-		return handleError(c, { message: "Data is not of type Gym[]" });
-	}
-	// const result = await insertData(data);
+	try {
+		const rawGymData = await parseHTML();
+		if (!isGymArray(rawGymData)) {
+			console.log(rawGymData);
+			return handleError(c, { message: "Data is not of type Gym[]" });
+		}
+		await insertGymStats(rawGymData);
 
-	return handleSuccess(c, {});
+		return handleSuccess(c, { message: "Gym stats updated successfully" });
+	} catch (error) {
+		console.error("Error inserting gym stats:", error);
+		return handleError(c, error);
+	}
 });
 
-// app.get("/gyms/stats/latest", async (c) => {
+app.get("/gyms/stats/latest", async (c) => {
+	const latestTime = await db
+		.select({ created: revoGymCount.created })
+		.from(revoGymCount)
+		.orderBy(desc(revoGymCount.created))
+		.limit(1);
+	if (!latestTime) {
+		return handleError(c, { message: "Could not get latestTime in database" });
+	}
 
-// 	try {
-// 		// Step 1: Get the latest `created_at` timestamp
-// 		const { data: latestEntry, error: latestError } = await supabase
-// 			.from("Revo Member Stats")
-// 			.select("created_at")
-// 			.order("created_at", { ascending: false })
-// 			.limit(1)
-// 			.single(); // Fetch the single latest entry
+	const latestData = await db
+		.select()
+		.from(revoGymCount)
+		.where(eq(revoGymCount.created, latestTime[0].created))
+		.orderBy(desc(revoGymCount.percentage));
 
-// 		if (latestError) throw latestError;
-// 		if (!latestEntry) throw new Error("No entries found in the database");
-
-// 		const latestCreatedAt = latestEntry.created_at;
-
-// 		// Step 2: Fetch all entries with the same latest `created_at` timestamp
-// 		const { data: filteredEntries, error: filteredError } = await supabase
-// 			.from("Revo Member Stats")
-// 			.select("name, size, member_count, member_ratio, percentage, created_at")
-// 			.eq("created_at", latestCreatedAt) // Filter all entries with this timestamp
-// 			.order("percentage", { ascending: false }); // Order by percentage descending
-
-// 		if (filteredError) throw filteredError;
-
-// 		const result = {
-// 			timestamp: latestCreatedAt,
-// 			data: filteredEntries, // Contains all entries with the same latest `created_at`
-// 		};
-
-// 		return handleSuccess(c, result);
-// 	} catch (error) {
-// 		console.error("Error fetching entries:", error);
-// 		return handleError(c, error);
-// 	}
-// });
+	if (!latestData) {
+		return handleError(c, { message: "Could not get latestData in database" });
+	}
+	return handleSuccess(c, latestData);
+});
 
 // app.get("/test", async (c) => {
 // 	const gymData = await parseHTML();

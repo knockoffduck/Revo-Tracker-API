@@ -3,10 +3,12 @@ import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { file } from "bun";
 import { db } from "./database";
-import { revoGyms } from "../db/schema";
+import { revoGymCount, revoGyms } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
 import { sql } from "drizzle-orm";
 import { add, get } from "cheerio/dist/commonjs/api/traversing";
+import { uuid } from "drizzle-orm/gel-core";
+import { v4 as uuidv4 } from "uuid";
 
 const options = {
 	method: "GET",
@@ -114,13 +116,49 @@ export const parseHTML = async () => {
 	return gymData;
 };
 
+export const insertGymStats = async (gymData: GymInfo[]) => {
+	const currentTime = new Date();
+	const gymList = await db
+		.select({ name: revoGyms.name, postcode: revoGyms.postcode })
+		.from(revoGyms);
+	let missingGyms: { name: string; postcode: number }[];
+
+	gymData.map(async (gym) => {
+		const inputInfo = {
+			id: uuidv4(),
+			created: currentTime,
+			count: gym.member_count,
+			ratio: gym.member_ratio,
+			gymName: gym.name,
+			percentage: gym.percentage,
+			gymId: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
+		};
+		await db.insert(revoGymCount).values(inputInfo);
+		return;
+	});
+	missingGyms = gymList.filter((gym) => {
+		return !gymData.some((g) => g.name === gym.name);
+	});
+	console.log("Missing gyms:", missingGyms);
+	missingGyms.map(async (gym) => {
+		const inputInfo = {
+			id: uuidv4(),
+			created: currentTime,
+			count: 0,
+			ratio: 0,
+			gymName: gym.name,
+			percentage: 0,
+			gymId: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
+		};
+		await db.insert(revoGymCount).values(inputInfo);
+		return;
+	});
+};
+
 export const updateGymInfo = async (gymData: GymInfo[]) => {
 	const currentTime = new Date();
 	gymData.map(async (gym) => {
-		if (gym.name === "Cockburn") {
-			console.log("Cockburn Gym");
-		}
-		const state = await extractState(gym.address);
+		const state = extractState(gym.address);
 
 		console.log(
 			"Gym name:",
@@ -135,7 +173,7 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			name: gym.name,
 			address: gym.address,
 			postcode: gym.postcode,
-			state: await extractState(gym.address),
+			state: extractState(gym.address),
 			areaSize: gym.size,
 			lastUpdated: currentTime,
 		};
@@ -159,44 +197,3 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 
 	return;
 };
-
-// const main = async () => {
-// 	const gymData = await parseHTML();
-// 	if (!gymData) return "error fetching gymdata";
-
-// 	return await updateGymInfo(gymData);
-// };
-
-// export const insertData = async (gymData: Gym[]) => {
-// 	// const supabase = supabaseClient();
-// 	// if (!(supabase instanceof SupabaseClient)) {
-// 	// 	console.error("Unable to access Supabase client");
-// 	// 	return;
-// 	// }
-// 	const jsonFile = Bun.file("src/utils/gyms.json");
-// 	const GYMS: { name: string; size: number }[] = await jsonFile.json();
-
-// 	for (let i = 0; i < GYMS.length; i++) {
-// 		const currentGym = GYMS[i];
-// 		const exists = gymData.some((gym) => gym.name === currentGym.name);
-// 		if (!exists) {
-// 			console.log(`Gym ${currentGym.name} has 0 members`);
-// 			gymData.push({
-// 				name: currentGym.name,
-// 				size: currentGym.size,
-// 				member_count: 0,
-// 				member_ratio: 0,
-// 				percentage: 0,
-// 			});
-// 		}
-// 	}
-// 	// const { data, error } = await supabase
-// 	// 	.from("Revo Member Stats")
-// 	// 	.insert(gymData)
-// 	// 	.select();
-// 	// if (error) {
-// 	// 	console.error(error);
-// 	// 	return 500;
-// 	// }
-// 	return GYMS;
-// };

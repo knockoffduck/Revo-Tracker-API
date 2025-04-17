@@ -1,5 +1,7 @@
 import { relations } from "drizzle-orm/relations";
 import {
+	revoGyms,
+	revoGymCount,
 	motherboards,
 	biosLinks,
 	itemSets,
@@ -7,6 +9,17 @@ import {
 	categories,
 	subcategories,
 } from "./schema";
+
+export const revoGymCountRelations = relations(revoGymCount, ({ one }) => ({
+	revoGym: one(revoGyms, {
+		fields: [revoGymCount.gymId],
+		references: [revoGyms.id],
+	}),
+}));
+
+export const revoGymsRelations = relations(revoGyms, ({ many }) => ({
+	revoGymCounts: many(revoGymCount),
+}));
 
 export const biosLinksRelations = relations(biosLinks, ({ one }) => ({
 	motherboard: one(motherboards, {
