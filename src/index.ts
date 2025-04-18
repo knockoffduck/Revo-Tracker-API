@@ -78,31 +78,25 @@ app.get("/gyms/stats/latest", async (c) => {
 	return handleSuccess(c, latestData);
 });
 
-// app.get("/test", async (c) => {
-// 	const gymData = await parseHTML();
-// 	if (!gymData) return "error fetching gymdata";
-// 	gymData.pop();
-// 	const supabase = supabaseClient();
-// 	if (!supabase) return "Cannot access Supabase";
-// 	const jsonFile = Bun.file("src/utils/gyms.json");
-// 	const GYMS: { name: string; size: number }[] = await jsonFile.json();
+const insertData = async () => {
+	console.log("Inserting data...");
+	try {
+		const rawGymData = await parseHTML();
+		if (!isGymArray(rawGymData)) {
+			console.log(rawGymData);
+			return { message: "Data is not of type Gym[]" };
+		}
+		await insertGymStats(rawGymData);
 
-// 	for (let i = 0; i < GYMS.length; i++) {
-// 		const currentGym = GYMS[i];
-// 		const exists = gymData.some((gym) => gym.name === currentGym.name);
-// 		if (!exists) {
-// 			console.log(`Gym ${currentGym.name} has 0 members`);
-// 			gymData.push({
-// 				name: currentGym.name,
-// 				size: currentGym.size,
-// 				member_count: 0,
-// 				member_ratio: 0,
-// 				percentage: 0,
-// 			});
-// 		}
-// 	}
-// 	return handleSuccess(c, gymData);
-// });
+		return { message: "Gym stats updated successfully" };
+	} catch (error) {
+		console.error("Error inserting gym stats:", error);
+		throw error;
+	}
+};
+
+// Set up the interval to run the function every 5 minutes (300,000 milliseconds)
+setInterval(insertData, 5 * 60 * 1000);
 
 export default {
 	port: 3001,

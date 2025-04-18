@@ -19,11 +19,11 @@ export const revoGymCount = mysqlTable(
 	"Revo_Gym_Count",
 	{
 		id: varchar({ length: 36 }).notNull(),
-		created: datetime().notNull(),
+		created: datetime({ mode: "string" }).notNull(),
 		count: int().notNull(),
 		ratio: double().notNull(),
 		gymName: text("gym_name").notNull(),
-		percentage: double(),
+		percentage: double().notNull(),
 		gymId: varchar("gym_id", { length: 36 })
 			.notNull()
 			.references(() => revoGyms.id),
@@ -38,7 +38,7 @@ export const revoGyms = mysqlTable(
 		name: text().notNull(),
 		state: text().notNull(),
 		areaSize: int("area_size").notNull(),
-		lastUpdated: datetime("last_updated").notNull(),
+		lastUpdated: datetime("last_updated", { mode: "string" }).notNull(),
 		address: text().notNull(),
 		postcode: int().notNull(),
 	},
