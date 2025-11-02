@@ -8,95 +8,97 @@ const app = new Hono();
 
 // Type guards remain unchanged
 const isGym = (data: any): data is GymInfo => {
-  return (
-    typeof data.name === "string" &&
-    typeof data.size === "number" &&
-    typeof data.member_count === "number" &&
-    typeof data.member_ratio === "number" &&
-    typeof data.percentage === "number" &&
-    typeof data.address === "string" &&
-    typeof data.postcode === "number" &&
-    typeof data.state === "string"
-  );
+    return (
+        typeof data.name === "string" &&
+        typeof data.size === "number" &&
+        typeof data.member_count === "number" &&
+        typeof data.member_ratio === "number" &&
+        typeof data.percentage === "number" &&
+        typeof data.address === "string" &&
+        typeof data.postcode === "number" &&
+        typeof data.state === "string"
+    );
 };
 
 const isGymArray = (data: any): data is GymInfo[] =>
-  Array.isArray(data) && data.every(isGym);
+    Array.isArray(data) && data.every(isGym);
 
 // Home Route - Fetch latest timestamp
 app.get("/", async (c) => {
-  const { data, error } = await supabase
-    .from("Revo_Gym_Count")
-    .select("created")
-    .order("created", { ascending: false })
-    .limit(1);
+    const { data, error } = await supabase
+        .from("Revo_Gym_Count")
+        .select("created")
+        .order("created", { ascending: false })
+        .limit(1);
 
-  if (error) return handleError(c, error);
+    if (error) return handleError(c, error);
 
-  console.log(data);
-  return c.text("API Home");
+    console.log(data);
+    return c.text("API Home");
 });
 
 // Update gym info route
 app.get("/gyms/update", async (c) => {
-  const data = await parseHTML();
-  if (!isGymArray(data)) {
-    return handleError(c, { message: "Data is not of type Gym[]" });
-  }
+    const data = await parseHTML();
+    if (!isGymArray(data)) {
+        return handleError(c, { message: "Data is not of type Gym[]" });
+    }
 
-  await updateGymInfo(data); // Update logic inside parser module
-  return handleSuccess(c, { message: "Data updated successfully" });
+    await updateGymInfo(data); // Update logic inside parser module
+    return handleSuccess(c, { message: "Data updated successfully" });
 });
 
 // Update gym stats route
 app.get("/gyms/stats/update", async (c) => {
-  try {
-    const rawGymData = await parseHTML();
-    if (!isGymArray(rawGymData)) {
-      return handleError(c, { message: "Data is not of type Gym[]" });
+    try {
+        const rawGymData = await parseHTML();
+        if (!isGymArray(rawGymData)) {
+            return handleError(c, { message: "Data is not of type Gym[]" });
+        }
+
+        await insertGymStats(rawGymData); // This can also be adapted to use supabase
+
+        return handleSuccess(c, { message: "Gym stats updated successfully" });
+    } catch (error) {
+        console.error("Error inserting gym stats:", error);
+        return handleError(c, error);
     }
-
-    await insertGymStats(rawGymData); // This can also be adapted to use supabase
-
-    return handleSuccess(c, { message: "Gym stats updated successfully" });
-  } catch (error) {
-    console.error("Error inserting gym stats:", error);
-    return handleError(c, error);
-  }
 });
 
 // Fetch latest gym stats
 app.get("/gyms/stats/latest", async (c) => {
-  // 1️⃣ Get latest timestamp
-  const { data: latestTimeData, error: latestError } = await supabase
-    .from("Revo_Gym_Count")
-    .select("created")
-    .order("created", { ascending: false })
-    .limit(1);
+    // 1️⃣ Get latest timestamp
+    const { data: latestTimeData, error: latestError } = await supabase
+        .from("Revo_Gym_Count")
+        .select("created")
+        .order("created", { ascending: false })
+        .limit(1);
 
-  if (latestError || !latestTimeData?.length) {
-    return handleError(c, { message: "Could not get latestTime in database" });
-  }
+    if (latestError || !latestTimeData?.length) {
+        return handleError(c, {
+            message: "Could not get latestTime in database",
+        });
+    }
 
-  const latestCreated = latestTimeData[0].created;
+    const latestCreated = latestTimeData[0].created;
 
-  // 2️⃣ Fetch all gym rows matching that timestamp
-  const { data: latestData, error: dataError } = await supabase
-    .from("Revo_Gym_Count")
-    .select("*")
-    .eq("created", latestCreated)
-    .order("percentage", { ascending: false });
+    // 2️⃣ Fetch all gym rows matching that timestamp
+    const { data: latestData, error: dataError } = await supabase
+        .from("Revo_Gym_Count")
+        .select("*")
+        .eq("created", latestCreated)
+        .order("percentage", { ascending: false });
 
-  if (dataError || !latestData) {
-    return handleError(c, {
-      message: "Could not get latestData in database",
-    });
-  }
+    if (dataError || !latestData) {
+        return handleError(c, {
+            message: "Could not get latestData in database",
+        });
+    }
 
-  return handleSuccess(c, latestData);
+    return handleSuccess(c, latestData);
 });
 
 export default {
-  port: 3001,
-  fetch: app.fetch,
+    port: 3050,
+    fetch: app.fetch,
 };
