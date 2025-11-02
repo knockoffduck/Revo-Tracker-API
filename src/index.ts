@@ -6,6 +6,26 @@ import { supabase } from "./utils/database";
 
 const app = new Hono();
 
+const callEveryFiveMinutes = () => {
+    const ENDPOINT = "https://revotrackerapi.dvcklab.com/gyms/stats/update"; // or your production URL
+
+    setInterval(
+        async () => {
+            try {
+                console.log(
+                    `[Scheduler] Executing ${ENDPOINT} at ${new Date().toISOString()}`,
+                );
+                const res = await fetch(ENDPOINT);
+                if (!res.ok) throw new Error(`Status ${res.status}`);
+                console.log(`[Scheduler] Success`);
+            } catch (err) {
+                console.error(`[Scheduler] Error:`, err);
+            }
+        },
+        5 * 60 * 1000,
+    ); // 5 minutes
+};
+
 // Type guards remain unchanged
 const isGym = (data: any): data is GymInfo => {
     return (
@@ -97,6 +117,8 @@ app.get("/gyms/stats/latest", async (c) => {
 
     return handleSuccess(c, latestData);
 });
+
+callEveryFiveMinutes();
 
 export default {
     port: 3050,
