@@ -1,7 +1,11 @@
 {
-  "compilerOptions": {
-    "strict": true,
-    "jsx": "react-jsx",
-    "jsxImportSource": "hono/jsx"
-  }
+    "compilerOptions": {
+        "target": "es2021",
+        "lib": ["es2021", "dom"],
+        "moduleResolution": "nodenext",
+        "module": "nodenext",
+        "strict": true,
+        "jsx": "react-jsx",
+        "jsxImportSource": "hono/jsx"
+    }
 }
