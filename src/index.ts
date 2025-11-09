@@ -129,6 +129,8 @@ app.get("/gyms/stats/latest", async (c) => {
 // 	return handleSuccess(c, gymData);
 // });
 
+callEveryFiveMinutes();
+
 export default {
   port: 3001,
   fetch: app.fetch,
