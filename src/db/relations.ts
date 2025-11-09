@@ -1,63 +1,55 @@
-import { relations } from "drizzle-orm";
+import { relations } from "drizzle-orm/relations";
 import {
-  revoGyms,
-  revoGymCount,
-  motherboards,
-  biosLinks,
-  itemSets,
-  items,
-  categories,
-  subcategories,
+	revoGyms,
+	revoGymCount,
+	motherboards,
+	biosLinks,
+	itemSets,
+	items,
+	categories,
+	subcategories,
 } from "./schema";
 
-// Revo Gym Count → Revo Gym (many-to-one)
 export const revoGymCountRelations = relations(revoGymCount, ({ one }) => ({
-  revoGym: one(revoGyms, {
-    fields: [revoGymCount.gymId],
-    references: [revoGyms.id],
-  }),
+	revoGym: one(revoGyms, {
+		fields: [revoGymCount.gymId],
+		references: [revoGyms.id],
+	}),
 }));
 
-// Revo Gyms → Revo Gym Count (one-to-many)
 export const revoGymsRelations = relations(revoGyms, ({ many }) => ({
-  revoGymCounts: many(revoGymCount),
+	revoGymCounts: many(revoGymCount),
 }));
 
-// BIOS Links → Motherboards (many-to-one)
 export const biosLinksRelations = relations(biosLinks, ({ one }) => ({
-  motherboard: one(motherboards, {
-    fields: [biosLinks.motherboardId],
-    references: [motherboards.mid],
-  }),
+	motherboard: one(motherboards, {
+		fields: [biosLinks.motherboardId],
+		references: [motherboards.mid],
+	}),
 }));
 
-// Motherboards → BIOS Links (one-to-many)
 export const motherboardsRelations = relations(motherboards, ({ many }) => ({
-  biosLinks: many(biosLinks),
+	biosLinks: many(biosLinks),
 }));
 
-// Items → Item Sets (many-to-one)
 export const itemsRelations = relations(items, ({ one }) => ({
-  itemSet: one(itemSets, {
-    fields: [items.itemSet],
-    references: [itemSets.id],
-  }),
+	itemSet: one(itemSets, {
+		fields: [items.itemSet],
+		references: [itemSets.id],
+	}),
 }));
 
-// Item Sets → Items (one-to-many)
 export const itemSetsRelations = relations(itemSets, ({ many }) => ({
-  items: many(items),
+	items: many(items),
 }));
 
-// Subcategories → Category (many-to-one)
 export const subcategoriesRelations = relations(subcategories, ({ one }) => ({
-  category: one(categories, {
-    fields: [subcategories.categories],
-    references: [categories.id],
-  }),
+	category: one(categories, {
+		fields: [subcategories.categories],
+		references: [categories.id],
+	}),
 }));
 
-// Categories → Subcategories (one-to-many)
 export const categoriesRelations = relations(categories, ({ many }) => ({
-  subcategories: many(subcategories),
+	subcategories: many(subcategories),
 }));
