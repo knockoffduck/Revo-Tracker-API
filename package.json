@@ -1,7 +1,8 @@
 {
   "name": "revo-tracker-api",
   "scripts": {
-    "dev": "bun run --hot src/index.ts"
+    "dev": "bun run --hot src/index.ts",
+    "start": "bun run src/index.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
