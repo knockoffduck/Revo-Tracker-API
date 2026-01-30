@@ -103,6 +103,69 @@ app.get("/gyms/stats/latest", async (c) => {
   }
 });
 
+// ============ Trend Agent Endpoints ============
+
+app.get("/gyms/trends/generate", async (c) => {
+  try {
+    const { runTrendAgent } = await import("./agents/trendAgent");
+    const lookbackDays = Number(c.req.query("lookback")) || 90;
+    const result = await runTrendAgent(lookbackDays);
+
+    if (result.success) {
+      return handleSuccess(c, {
+        message: `Trend calculation completed for ${result.gymsProcessed} gyms`,
+        gymsProcessed: result.gymsProcessed,
+        errors: result.errors,
+      });
+    } else {
+      return handleError(c, {
+        message: "Trend calculation failed",
+        errors: result.errors,
+      });
+    }
+  } catch (error) {
+    console.error("Error generating trends:", error);
+    return handleError(c, error);
+  }
+});
+
+app.get("/gyms/trends/:gymId", async (c) => {
+  try {
+    const { getGymTrends } = await import("./agents/trendAgent");
+    const gymId = c.req.param("gymId");
+    const trends = await getGymTrends(gymId);
+
+    if (trends.length === 0) {
+      return handleError(c, {
+        message: `No trend data found for gym ${gymId}. Run /gyms/trends/generate first.`,
+      });
+    }
+
+    return handleSuccess(c, trends);
+  } catch (error) {
+    console.error("Error getting gym trends:", error);
+    return handleError(c, error);
+  }
+});
+
+app.get("/gyms/trends", async (c) => {
+  try {
+    const { getAllGymTrends } = await import("./agents/trendAgent");
+    const trendsMap = await getAllGymTrends();
+
+    // Convert Map to object for JSON serialization
+    const trendsObj: Record<string, any> = {};
+    trendsMap.forEach((value, key) => {
+      trendsObj[key] = value;
+    });
+
+    return handleSuccess(c, trendsObj);
+  } catch (error) {
+    console.error("Error getting all gym trends:", error);
+    return handleError(c, error);
+  }
+});
+
 // app.get("/test", async (c) => {
 // 	const gymData = await parseHTML();
 // 	if (!gymData) return "error fetching gymdata";
@@ -129,7 +192,9 @@ app.get("/gyms/stats/latest", async (c) => {
 // 	return handleSuccess(c, gymData);
 // });
 
-callEveryFiveMinutes();
+if (import.meta.main) {
+  callEveryFiveMinutes();
+}
 
 export default {
   port: 3001,
