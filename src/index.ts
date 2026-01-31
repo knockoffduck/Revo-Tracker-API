@@ -105,26 +105,41 @@ app.get("/gyms/stats/latest", async (c) => {
 
 // ============ Trend Agent Endpoints ============
 
+// Global lock to prevent concurrent trend generation
+let isTrendGenerationRunning = false;
+
 app.get("/gyms/trends/generate", async (c) => {
+  if (isTrendGenerationRunning) {
+    return handleError(c, {
+      message: "Trend generation is already running. Check server logs for progress.",
+    }, 409);
+  }
+
   try {
     const { runTrendAgent } = await import("./agents/trendAgent");
     const lookbackDays = Number(c.req.query("lookback")) || 90;
-    const result = await runTrendAgent(lookbackDays);
 
-    if (result.success) {
-      return handleSuccess(c, {
-        message: `Trend calculation completed for ${result.gymsProcessed} gyms`,
-        gymsProcessed: result.gymsProcessed,
-        errors: result.errors,
+    // Run in background
+    isTrendGenerationRunning = true;
+    console.log("[API] Starting background trend generation...");
+
+    // Fire and forget (with cleanup)
+    runTrendAgent(lookbackDays)
+      .then((result) => {
+        console.log(`[API] Trend generation finished: ${result.success ? "Success" : "Failed"}`);
+        isTrendGenerationRunning = false;
+      })
+      .catch((err) => {
+        console.error("[API] Trend generation crashed:", err);
+        isTrendGenerationRunning = false;
       });
-    } else {
-      return handleError(c, {
-        message: "Trend calculation failed",
-        errors: result.errors,
-      });
-    }
+
+    return handleSuccess(c, {
+      message: "Trend generation started in background. Check server logs for progress.",
+    }, 202);
   } catch (error) {
-    console.error("Error generating trends:", error);
+    console.error("Error initiating trends:", error);
+    isTrendGenerationRunning = false;
     return handleError(c, error);
   }
 });
@@ -199,4 +214,5 @@ if (import.meta.main) {
 export default {
   port: 3001,
   fetch: app.fetch,
+  idleTimeout: 60 // 5 minutes (default is 30s in Bun, Hono might be interfering or client side timeout, but user said "bun.server has timed out")
 };

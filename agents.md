@@ -60,6 +60,18 @@ This project is an API and background service designed to track live member stat
 - `GET /gyms/update`: Scrapes and updates gym metadata (names, locations).
 - `GET /gyms/stats/update`: Scrapes and inserts a new stats record for all gyms.
 - `GET /gyms/stats/latest`: Retrieves the most recent stats entry from the database.
+- `GET /gyms/trends/generate`: triggers nightly calculation of historical trends (timezone-aware).
+- `GET /gyms/trends/:gymId`: Retrieves cached trend data for charts.
+
+### D. Predictive Analytics (Trend Agent)
+**File:** `src/agents/trendAgent.ts`
+- **Goal:** Pre-calculate "Popular Times" to avoid expensive queries on read.
+- **Workflow:**
+  1. Fetches last 90 days of data.
+  2. Groups by Gym + Day of Week + 15-min Slot.
+  3. Uses `revoGyms.timezone` to correctly bucket UTC timestamps into local gym time.
+  4. Upserts results to `Revo_Gym_Trends` table.
+- **Usage:** Run `/gyms/trends/generate` nightly.
 
 ## 5. Database Schema
 **File:** `src/db/schema.ts`

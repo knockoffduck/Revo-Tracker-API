@@ -25,6 +25,8 @@ export const revoGyms = mysqlTable("Revo_Gyms", {
 	lastUpdated: datetime("last_updated", { mode: 'string'}).notNull(),
 	address: text().notNull(),
 	postcode: int().notNull(),
+	active: tinyint().notNull(),
+	timezone: varchar({ length: 50 }).default('Australia/Perth').notNull(),
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "Revo_Gyms_id"}),

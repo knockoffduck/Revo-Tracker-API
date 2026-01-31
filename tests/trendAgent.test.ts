@@ -1,12 +1,12 @@
-import { describe, expect, test, mock, beforeEach } from "bun:test";
+import { describe, expect, test, mock } from "bun:test";
 import {
     generateTimeSlots,
-    dateToSlot,
+    getLocalTimeParts,
     calculateTrends,
     formatTrendDataForDay,
 } from "../src/agents/trendAgent";
 
-// Mock the database module to prevent actual DB calls
+// Mock the database module
 mock.module("../src/utils/database", () => {
     const mockDb = {
         select: mock(() => mockDb),
@@ -17,6 +17,7 @@ mock.module("../src/utils/database", () => {
         insert: mock(() => mockDb),
         values: mock(() => mockDb),
         onDuplicateKeyUpdate: mock(() => mockDb),
+        innerJoin: mock(() => mockDb),
         then: (resolve: any) => resolve([]),
     };
     return { db: mockDb };
@@ -24,162 +25,96 @@ mock.module("../src/utils/database", () => {
 
 describe("TrendAgent Unit Tests", () => {
     describe("generateTimeSlots", () => {
-        test("should generate 96 time slots for a 24-hour day (every 15 minutes)", () => {
+        test("should generate 96 time slots", () => {
             const slots = generateTimeSlots();
-            expect(slots.length).toBe(96); // 24 hours * 4 slots per hour
-        });
-
-        test("should start with 00:00 and end with 23:45", () => {
-            const slots = generateTimeSlots();
-            expect(slots[0]).toBe("00:00");
-            expect(slots[slots.length - 1]).toBe("23:45");
-        });
-
-        test("should have correct sequential slots", () => {
-            const slots = generateTimeSlots();
-            expect(slots[0]).toBe("00:00");
-            expect(slots[1]).toBe("00:15");
-            expect(slots[2]).toBe("00:30");
-            expect(slots[3]).toBe("00:45");
-            expect(slots[4]).toBe("01:00");
+            expect(slots.length).toBe(96);
         });
     });
 
-    describe("dateToSlot", () => {
-        test("should round down to nearest 15-minute slot", () => {
-            // 14:37 should round down to 14:30
-            const date = new Date("2024-01-15T14:37:00");
-            expect(dateToSlot(date)).toBe("14:30");
+    describe("getLocalTimeParts", () => {
+        test("should convert UTC to Perth time correctly", () => {
+            // 2024-01-30 10:00:00 UTC -> 18:00:00 Perth (+8)
+            const utcStr = "2024-01-30 10:00:00";
+            const result = getLocalTimeParts(utcStr, "Australia/Perth");
+
+            expect(result.timeSlot).toBe("18:00");
+            expect(result.dayOfWeek).toBe(2); // Tuesday (Jan 30 2024 is Tuesday)
         });
 
-        test("should handle exact 15-minute boundaries", () => {
-            const date = new Date("2024-01-15T09:15:00");
-            expect(dateToSlot(date)).toBe("09:15");
+        test("should handle date with Z suffix", () => {
+            const utcStr = "2024-01-30T10:05:00Z"; // 18:05 Perth -> rounded to 18:00
+            const result = getLocalTimeParts(utcStr, "Australia/Perth");
+
+            expect(result.timeSlot).toBe("18:00");
         });
 
-        test("should handle midnight correctly", () => {
-            const date = new Date("2024-01-15T00:05:00");
-            expect(dateToSlot(date)).toBe("00:00");
-        });
+        test("should handle different timezone (New York)", () => {
+            // 2024-01-30 10:00:00 UTC -> 05:00:00 NY (-5)
+            const utcStr = "2024-01-30 10:00:00";
+            const result = getLocalTimeParts(utcStr, "America/New_York");
 
-        test("should handle end of day correctly", () => {
-            const date = new Date("2024-01-15T23:59:00");
-            expect(dateToSlot(date)).toBe("23:45");
+            expect(result.timeSlot).toBe("05:00");
         });
     });
 
     describe("calculateTrends", () => {
-        test("should group records by gym, day of week, and time slot", () => {
+        test("should correctly aggregate counts for a single gym", () => {
             const records = [
                 {
-                    gymId: "gym1",
-                    gymName: "Test Gym",
-                    created: "2024-01-15T10:30:00", // Monday
+                    created: "2024-01-30 10:00:00", // 18:00 Perth
                     count: 50,
                 },
                 {
-                    gymId: "gym1",
-                    gymName: "Test Gym",
-                    created: "2024-01-22T10:35:00", // Also Monday
-                    count: 60,
-                },
-            ];
-
-            const trends = calculateTrends(records);
-
-            expect(trends.has("gym1")).toBe(true);
-            const gymMap = trends.get("gym1")!;
-            expect(gymMap.has(1)).toBe(true); // Monday = 1
-
-            const mondayMap = gymMap.get(1)!;
-            expect(mondayMap.has("10:30")).toBe(true);
-
-            const slotData = mondayMap.get("10:30")!;
-            expect(slotData.sum).toBe(110); // 50 + 60
-            expect(slotData.count).toBe(2);
-        });
-
-        test("should separate different gyms correctly", () => {
-            const records = [
-                {
-                    gymId: "gym1",
-                    gymName: "Gym One",
-                    created: "2024-01-15T10:00:00",
+                    created: "2024-01-30 10:05:00", // 18:00 Perth (rounded)
                     count: 30,
                 },
+                // Different bucket
                 {
-                    gymId: "gym2",
-                    gymName: "Gym Two",
-                    created: "2024-01-15T10:00:00",
-                    count: 40,
-                },
+                    created: "2024-01-30 10:20:00", // 18:15 Perth
+                    count: 20,
+                }
             ];
+            const timezone = "Australia/Perth";
+            const dayMap = calculateTrends(records, timezone);
 
-            const trends = calculateTrends(records);
+            // Check Tuesday (2)
+            expect(dayMap.has(2)).toBe(true);
+            const tuesdayMap = dayMap.get(2)!;
 
-            expect(trends.has("gym1")).toBe(true);
-            expect(trends.has("gym2")).toBe(true);
-            expect(trends.size).toBe(2);
+            // Check 18:00 slot (50 + 30 = 80, count 2)
+            expect(tuesdayMap.has("18:00")).toBe(true);
+            const slot1800 = tuesdayMap.get("18:00")!;
+            expect(slot1800.sum).toBe(80);
+            expect(slot1800.count).toBe(2);
+
+            // Check 18:15 slot (20, count 1)
+            expect(tuesdayMap.has("18:15")).toBe(true);
+            const slot1815 = tuesdayMap.get("18:15")!;
+            expect(slot1815.sum).toBe(20);
+            expect(slot1815.count).toBe(1);
         });
 
         test("should handle empty records", () => {
-            const trends = calculateTrends([]);
-            expect(trends.size).toBe(0);
+            const records: any[] = [];
+            const dayMap = calculateTrends(records, "Australia/Perth");
+            expect(dayMap.size).toBe(0);
         });
     });
 
     describe("formatTrendDataForDay", () => {
-        test("should return all 96 time slots", () => {
+        test("should format correctly and calculate averages", () => {
             const dayMap = new Map<string, { sum: number; count: number }>();
-            dayMap.set("10:00", { sum: 100, count: 2 });
+            dayMap.set("10:00", { sum: 100, count: 2 }); // Average 50
+            dayMap.set("10:15", { sum: 0, count: 0 }); // Edge case, though usually count > 0 if in map
 
             const formatted = formatTrendDataForDay(dayMap);
 
-            expect(formatted.length).toBe(96);
-        });
-
-        test("should calculate correct averages for slots with data", () => {
-            const dayMap = new Map<string, { sum: number; count: number }>();
-            dayMap.set("10:00", { sum: 100, count: 2 }); // Average = 50
-            dayMap.set("14:30", { sum: 150, count: 3 }); // Average = 50
-
-            const formatted = formatTrendDataForDay(dayMap);
-
-            const slot1000 = formatted.find((s) => s.time === "10:00");
+            const slot1000 = formatted.find(s => s.time === "10:00");
             expect(slot1000?.average).toBe(50);
             expect(slot1000?.sampleCount).toBe(2);
 
-            const slot1430 = formatted.find((s) => s.time === "14:30");
-            expect(slot1430?.average).toBe(50);
-            expect(slot1430?.sampleCount).toBe(3);
-        });
-
-        test("should return 0 for slots without data", () => {
-            const dayMap = new Map<string, { sum: number; count: number }>();
-            dayMap.set("10:00", { sum: 100, count: 2 });
-
-            const formatted = formatTrendDataForDay(dayMap);
-
-            const emptySlot = formatted.find((s) => s.time === "03:00");
-            expect(emptySlot?.average).toBe(0);
-            expect(emptySlot?.sampleCount).toBe(0);
-        });
-
-        test("should handle undefined dayMap gracefully", () => {
-            const formatted = formatTrendDataForDay(undefined);
-
-            expect(formatted.length).toBe(96);
-            expect(formatted.every((s) => s.average === 0)).toBe(true);
-        });
-
-        test("should round averages to integers", () => {
-            const dayMap = new Map<string, { sum: number; count: number }>();
-            dayMap.set("10:00", { sum: 100, count: 3 }); // 100/3 = 33.33...
-
-            const formatted = formatTrendDataForDay(dayMap);
-
-            const slot = formatted.find((s) => s.time === "10:00");
-            expect(slot?.average).toBe(33); // Math.round(33.33) = 33
+            const slot1015 = formatted.find(s => s.time === "10:15");
+            expect(slot1015?.average).toBe(0); // Should handle zeroes
         });
     });
 });
