@@ -129,7 +129,8 @@ export const parseHTML = async () => {
 
 		if (metadata) {
 			const size = metadata.areaSize || 0;
-			const memberAreaRatio = size > 0 && memberCount > 0 ? size / memberCount : 0;
+			const count = memberCount > 0 ? memberCount : 0;
+			const memberAreaRatio = size > 0 && count > 0 ? size / count : 0;
 			
 			gymData.push({
 				name: name,
@@ -137,9 +138,9 @@ export const parseHTML = async () => {
 				postcode: metadata.postcode || 0,
 				size: size,
 				state: metadata.state || "",
-				member_count: memberCount,
+				member_count: count,
 				member_ratio: memberAreaRatio,
-				percentage: size > 0 ? (1 - (memberAreaRatio > 60 ? 60 : memberAreaRatio) / 60) * 100 : 0,
+				percentage: size > 0 && count > 0 ? (1 - (memberAreaRatio > 60 ? 60 : memberAreaRatio) / 60) * 100 : 0,
 			});
 		} else {
 			// If it's a new gym not in our DB yet, we push basic info
@@ -166,7 +167,7 @@ export const parseHTML = async () => {
 export const insertGymStats = async (gymData: GymInfo[]) => {
 	const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
 	const gymList = await db
-		.select({ name: revoGyms.name, postcode: revoGyms.postcode })
+		.select()
 		.from(revoGyms);
 
 	for (const gym of gymData) {
@@ -213,11 +214,26 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			// File doesn't exist yet or is invalid
 		}
 
+		const fullData = [
+			...gymData,
+			...missingGyms.map(gym => ({
+				name: gym.name,
+				address: gym.address || "Pending Update",
+				postcode: gym.postcode || 0,
+				size: gym.areaSize || 0,
+				state: gym.state || "Unknown",
+				member_count: 0,
+				member_ratio: 0,
+				percentage: 0,
+			}))
+		];
+
 		const newEntry = {
 			timestamp: currentTime,
 			gymCount: gymData.length,
 			missingGyms: missingGyms.length,
-			data: gymData.slice(0, 5), // Log first 5 gyms for detail
+			totalGyms: gymList.length,
+			data: fullData, // Log the full list of gyms (including missing ones)
 		};
 
 		logs.unshift(newEntry);
