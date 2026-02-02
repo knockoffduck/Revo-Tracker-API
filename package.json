@@ -12,6 +12,7 @@
     "dotenv": "^16.5.0",
     "drizzle-orm": "^0.42.0",
     "hono": "^4.6.5",
+    "https-proxy-agent": "^7.0.6",
     "mysql2": "^3.14.0",
     "uuid": "^13.0.0"
   },

@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, mock, beforeEach } from "bun:test";
 import app from "../src/index";
 import { parseHTML } from "../src/utils/parser";
 
@@ -50,6 +50,12 @@ mock.module("../src/utils/database", () => {
 
 
 describe("API Endpoint Tests", () => {
+    beforeEach(async () => {
+        const { parseHTML, insertGymStats, updateGymInfo } = await import("../src/utils/parser");
+        (parseHTML as any).mockClear();
+        (insertGymStats as any).mockClear();
+        (updateGymInfo as any).mockClear();
+    });
 
     test("GET / should return 'API Home'", async () => {
         const req = new Request("http://localhost/");

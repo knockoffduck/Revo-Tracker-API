@@ -10,6 +10,8 @@ const app = new Hono();
 
 const callEveryFiveMinutes = () => {
   const ENDPOINT = "https://revotrackerapi.dvcklab.com/gyms/stats/update"; // or your production URL
+  const TESTENDPOINT = "http://localhost:3001/gyms/stats/update";
+
 
   setInterval(
     async () => {
@@ -23,7 +25,8 @@ const callEveryFiveMinutes = () => {
       } catch (err) {
         console.error(`[Scheduler] Error:`, err);
       }
-    },
+    }, //20 seconds 
+    //20 * 1000,
     5 * 60 * 1000,
   ); // 5 minutes
 };
@@ -44,7 +47,6 @@ const isGym = (data: any): data is GymInfo => {
 
 // Type guard function to check if an array is of type Gym[]
 const isGymArray = (data: any): data is GymInfo[] => {
-  console.log(data);
   return Array.isArray(data) && data.every(isGym);
 };
 
@@ -65,9 +67,9 @@ app.get("/gyms/stats/update", async (c) => {
   try {
     const rawGymData = await parseHTML();
     if (!isGymArray(rawGymData)) {
-      console.log(rawGymData);
       return handleError(c, { message: "Data is not of type Gym[]" });
     }
+    await updateGymInfo(rawGymData);
     await insertGymStats(rawGymData);
 
     return handleSuccess(c, { message: "Gym stats updated successfully" });
@@ -95,7 +97,7 @@ app.get("/gyms/stats/latest", async (c) => {
       .from(revoGymCount)
       .where(eq(revoGymCount.created, latestTime[0].created))
       .orderBy(desc(revoGymCount.percentage));
-    console.log(latestData);
+
     return handleSuccess(c, latestData);
   } catch (error) {
     console.error("Error getting latest gym stats:", error);

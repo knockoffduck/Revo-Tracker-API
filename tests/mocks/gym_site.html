@@ -5,17 +5,20 @@
     <title>Revo Fitness Live Counters</title>
 </head>
 <body>
-    <!-- Gym 1: Standard Case -->
+    <!-- New Parser Structure -->
+    <a class="club-shortname" data-club-name="Perth City" data-member-in-club="150"></a>
+    <a class="club-shortname" data-club-name="Scarborough" data-member-in-club="400"></a>
+    <a class="club-shortname" data-club-name="Claremont" data-member-in-club="50"></a>
+
+    <!-- OLD Structure (keeping for compatibility or reference) -->
     <div data-counter-card="Perth City">
         <div data-address>
             <span class="is-h6">123 Hay St, Perth, 6000</span>
         </div>
         <div>
-            <!-- Size element: looks like parser finds the last .is-h6 in the card -->
             <span class="is-h6">1500sq/m</span>
         </div>
     </div>
-    <!-- The count is often separate or matched by data-live-count attribute -->
     <span data-live-count="Perth City">150</span>
 
     <!-- Gym 2: New South Wales Case -->

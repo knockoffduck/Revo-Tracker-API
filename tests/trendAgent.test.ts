@@ -1,9 +1,10 @@
-import { describe, expect, test, mock } from "bun:test";
+import { describe, expect, test, mock, beforeEach } from "bun:test";
 import {
     generateTimeSlots,
     getLocalTimeParts,
     calculateTrends,
     formatTrendDataForDay,
+    runTrendAgent,
 } from "../src/agents/trendAgent";
 
 // Mock the database module
@@ -24,6 +25,17 @@ mock.module("../src/utils/database", () => {
 });
 
 describe("TrendAgent Unit Tests", () => {
+    beforeEach(async () => {
+        const { db } = await import("../src/utils/database");
+        (db.select as any).mockClear();
+        (db.from as any).mockClear();
+        (db.where as any).mockClear();
+        (db.orderBy as any).mockClear();
+        (db.limit as any).mockClear();
+        (db.insert as any).mockClear();
+        (db.values as any).mockClear();
+        (db.onDuplicateKeyUpdate as any).mockClear();
+    });
     describe("generateTimeSlots", () => {
         test("should generate 96 time slots", () => {
             const slots = generateTimeSlots();
@@ -115,6 +127,35 @@ describe("TrendAgent Unit Tests", () => {
 
             const slot1015 = formatted.find(s => s.time === "10:15");
             expect(slot1015?.average).toBe(0); // Should handle zeroes
+        });
+    });
+
+    describe("runTrendAgent", () => {
+        test("should process gyms and call upsertTrendCache", async () => {
+            // Need to mock the database to return some gyms
+            const { db } = await import("../src/utils/database");
+            
+            // Mock revoGyms.id, revoGyms.name, revoGyms.timezone
+            // The actual code uses db.select(...).from(revoGyms)
+            // Our mock currently returns [] in trendAgent.test.ts:21
+            
+            // Let's refine the mock for this test
+            (db as any).then = (resolve: any) => resolve([
+                { id: "gym-1", name: "Gym 1", timezone: "Australia/Perth" }
+            ]);
+
+            // We also need to mock fetchGymData if we want to avoid actual lookback logic
+            // But since we are testing runTrendAgent, we can just let it call fetchGymData 
+            // and ensure fetchGymData returns items.
+            // fetchGymData uses db.select().from(revoGymCount).where(...)
+            
+            const result = await runTrendAgent(7);
+            
+            expect(result.success).toBe(true);
+            expect(result.gymsProcessed).toBe(1);
+            // It should have called insert 7 times (one for each day)
+            // But our mock database's insert is just a mock, so we can check if it was called.
+            expect(db.insert).toHaveBeenCalled();
         });
     });
 });

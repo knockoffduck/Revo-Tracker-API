@@ -22,6 +22,32 @@ mock.module("axios", () => {
     };
 });
 
+// Mock Database
+mock.module("../src/utils/database", () => {
+    const mockDb = {
+        select: mock(() => mockDb),
+        from: mock(() => mockDb),
+        where: mock(() => mockDb),
+        orderBy: mock(() => mockDb),
+        limit: mock(() => mockDb),
+        insert: mock(() => mockDb),
+        values: mock(() => mockDb),
+        onDuplicateKeyUpdate: mock(() => mockDb),
+        // Handle database results for revoGyms
+        then: (resolve: any) => {
+            // Check if we are selecting from revoGyms (simplified)
+            resolve([
+                { name: "Perth City", address: "123 Hay St, Perth", postcode: 6000, state: "WA", areaSize: 1500 },
+                { name: "Scarborough", address: "555 Coast Rd, Scarborough", postcode: 6019, state: "WA", areaSize: 2000 },
+                { name: "Claremont", address: "10 Bay View Tce, Claremont", postcode: 6010, state: "WA", areaSize: 1000 }
+            ]);
+        }
+    };
+    return {
+        db: mockDb
+    };
+});
+
 describe("Parser tests", () => {
     test("parseHTML should correctly extract gym data from mock HTML", async () => {
         const gymData = await parseHTML();
@@ -37,34 +63,21 @@ describe("Parser tests", () => {
         expect(perthCity?.state).toBe("WA");
         expect(perthCity?.size).toBe(1500);
         expect(perthCity?.member_count).toBe(150);
-        expect(perthCity?.member_ratio).toBe(10); // 1500 / 150 = 10
+        // Ratio: 1500 / 150 = 10
+        expect(perthCity?.member_ratio).toBe(10); 
 
         const scarborough = gymData?.find(gym => gym.name === "Scarborough");
         expect(scarborough?.member_count).toBe(400);
-        expect(scarborough?.state).toBe("WA"); // 6019 is WA, assuming scraper logic handles recent postcodes or simple state logic
+        expect(scarborough?.size).toBe(2000);
+        // Ratio: 2000 / 400 = 5
+        expect(scarborough?.member_ratio).toBe(5);
 
-        const claremont = gymData?.find(gym => gym.name.trim() === "Claremont");
-        // Note: The parser implementation might need to handle trimming if it doesn't already.
-        // Looking at parser.ts:
-        // const name = $(element).attr("data-counter-card"); -> "  Claremont  "
-        // Address extraction might preserve spaces.
-        // Let's check if the code trims.
-        // src/utils/parser.ts: 
-        // const size = Number(... .trim() ...)
-        // const memberCount = Number(... .trim())
-        // const name = $(element).attr(...); NO TRIM on name attribute usage directly?
-        // Wait, gymData.push({ name: name ... })
-
-        if (claremont) {
-            expect(claremont.size).toBe(1000);
-            expect(claremont.member_count).toBe(50);
-        } else {
-            // If not found by trimmed name, check if it exists with spaces?
-            // Actually the mock has data-counter-card="  Claremont  "
-            // The parser uses: $(`span[data-live-count="${name}"]`)
-            // If name has spaces, the selector might need quotes or be exact match. 
-            // The mock span has data-live-count="  Claremont  ". So it should match.
-        }
+        const claremont = gymData?.find(gym => gym.name === "Claremont");
+        expect(claremont).toBeDefined();
+        expect(claremont?.size).toBe(1000);
+        expect(claremont?.member_count).toBe(50);
+        // Ratio: 1000 / 50 = 20
+        expect(claremont?.member_ratio).toBe(20);
     });
 
     test("Handling of missing data", async () => {

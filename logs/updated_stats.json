@@ -1,0 +1,167 @@
+[
+  {
+    "timestamp": "2026-02-02 13:17:57",
+    "gymCount": 72,
+    "missingGyms": 2,
+    "data": [
+      {
+        "name": "Australind",
+        "address": "Unit 1, 11 The Promenade, Australind Western Australia 6233",
+        "postcode": 6233,
+        "size": 1200,
+        "state": "WA",
+        "member_count": 25,
+        "member_ratio": 48,
+        "percentage": 19.999999999999996
+      },
+      {
+        "name": "Balcatta",
+        "address": "2/39 Erindale Road, Balcatta WA 6021",
+        "postcode": 6021,
+        "size": 1180,
+        "state": "WA",
+        "member_count": 53,
+        "member_ratio": 22.264150943396228,
+        "percentage": 62.893081761006286
+      },
+      {
+        "name": "Banksia Grove",
+        "address": "7 Honeybee Parade Banksia Grove WA 6031",
+        "postcode": 6031,
+        "size": 1100,
+        "state": "WA",
+        "member_count": 46,
+        "member_ratio": 23.91304347826087,
+        "percentage": 60.14492753623188
+      },
+      {
+        "name": "Belmont",
+        "address": "Lot 7, 227 Belmont Avenue Cloverdale WA 6105",
+        "postcode": 6105,
+        "size": 1050,
+        "state": "WA",
+        "member_count": 46,
+        "member_ratio": 22.82608695652174,
+        "percentage": 61.956521739130444
+      },
+      {
+        "name": "Bunbury",
+        "address": "27 Spencer Street, Bunbury WA 6230",
+        "postcode": 6230,
+        "size": 1580,
+        "state": "WA",
+        "member_count": 28,
+        "member_ratio": 56.42857142857143,
+        "percentage": 5.952380952380953
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-02 13:10:53",
+    "gymCount": 72,
+    "missingGyms": 2,
+    "data": [
+      {
+        "name": "Australind",
+        "address": "Unit 1, 11 The Promenade, Australind Western Australia 6233",
+        "postcode": 6233,
+        "size": 1200,
+        "state": "WA",
+        "member_count": 24,
+        "member_ratio": 50,
+        "percentage": 16.666666666666664
+      },
+      {
+        "name": "Balcatta",
+        "address": "2/39 Erindale Road, Balcatta WA 6021",
+        "postcode": 6021,
+        "size": 1180,
+        "state": "WA",
+        "member_count": 60,
+        "member_ratio": 19.666666666666668,
+        "percentage": 67.22222222222223
+      },
+      {
+        "name": "Banksia Grove",
+        "address": "7 Honeybee Parade Banksia Grove WA 6031",
+        "postcode": 6031,
+        "size": 1100,
+        "state": "WA",
+        "member_count": 43,
+        "member_ratio": 25.58139534883721,
+        "percentage": 57.36434108527132
+      },
+      {
+        "name": "Belmont",
+        "address": "Lot 7, 227 Belmont Avenue Cloverdale WA 6105",
+        "postcode": 6105,
+        "size": 1050,
+        "state": "WA",
+        "member_count": 52,
+        "member_ratio": 20.192307692307693,
+        "percentage": 66.34615384615384
+      },
+      {
+        "name": "Bunbury",
+        "address": "27 Spencer Street, Bunbury WA 6230",
+        "postcode": 6230,
+        "size": 1580,
+        "state": "WA",
+        "member_count": 28,
+        "member_ratio": 56.42857142857143,
+        "percentage": 5.952380952380953
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-02 13:10:02",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-02 13:09:58",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-02-02 13:09:10",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      }
+    ]
+  }
+]
