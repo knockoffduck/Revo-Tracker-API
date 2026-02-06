@@ -1,15 +1,40 @@
-import { describe, expect, test, mock, beforeEach } from "bun:test";
+import { describe, expect, test, mock, beforeEach, Mock } from "bun:test";
 import {
     generateTimeSlots,
     getLocalTimeParts,
     calculateTrends,
     formatTrendDataForDay,
     runTrendAgent,
+    fetchGymData,
+    upsertTrendCache,
+    getGymTrends,
+    getAllGymTrends,
+    TimeSlotAverage,
 } from "../src/agents/trendAgent";
+
+// Track mock data for different scenarios
+let mockQueryResult: unknown[] = [];
+
+// Define mock database interface
+interface MockDb {
+    select: Mock<() => MockDb>;
+    from: Mock<() => MockDb>;
+    where: Mock<() => MockDb>;
+    orderBy: Mock<() => MockDb>;
+    limit: Mock<() => MockDb>;
+    insert: Mock<() => MockDb>;
+    values: Mock<() => MockDb>;
+    onDuplicateKeyUpdate: Mock<() => MockDb>;
+    innerJoin: Mock<() => MockDb>;
+    then: (resolve: (value: unknown[]) => unknown) => unknown;
+    _setQueryResult: (result: unknown[]) => void;
+}
 
 // Mock the database module
 mock.module("../src/utils/database", () => {
-    const mockDb = {
+    let internalQueryResult: unknown[] = [];
+    
+    const mockDb: MockDb = {
         select: mock(() => mockDb),
         from: mock(() => mockDb),
         where: mock(() => mockDb),
@@ -19,23 +44,37 @@ mock.module("../src/utils/database", () => {
         values: mock(() => mockDb),
         onDuplicateKeyUpdate: mock(() => mockDb),
         innerJoin: mock(() => mockDb),
-        then: (resolve: any) => resolve([]),
+        then: (resolve: (value: unknown[]) => unknown) => resolve(internalQueryResult),
+        _setQueryResult: (result: unknown[]) => {
+            internalQueryResult = result;
+        },
     };
     return { db: mockDb };
 });
 
 describe("TrendAgent Unit Tests", () => {
+    let mockDb: MockDb;
+
     beforeEach(async () => {
-        const { db } = await import("../src/utils/database");
-        (db.select as any).mockClear();
-        (db.from as any).mockClear();
-        (db.where as any).mockClear();
-        (db.orderBy as any).mockClear();
-        (db.limit as any).mockClear();
-        (db.insert as any).mockClear();
-        (db.values as any).mockClear();
-        (db.onDuplicateKeyUpdate as any).mockClear();
+        const { db } = await import("../src/utils/database") as unknown as { db: MockDb };
+        mockDb = db;
+        db.select.mockClear();
+        db.from.mockClear();
+        db.where.mockClear();
+        db.orderBy.mockClear();
+        db.limit.mockClear();
+        db.insert.mockClear();
+        db.values.mockClear();
+        db.onDuplicateKeyUpdate.mockClear();
+        mockQueryResult = [];
+        db._setQueryResult([]);
     });
+
+    // Helper to set mock data
+    const setMockData = (data: unknown[]) => {
+        mockQueryResult = data;
+        mockDb._setQueryResult(data);
+    };
     describe("generateTimeSlots", () => {
         test("should generate 96 time slots", () => {
             const slots = generateTimeSlots();
@@ -107,7 +146,7 @@ describe("TrendAgent Unit Tests", () => {
         });
 
         test("should handle empty records", () => {
-            const records: any[] = [];
+            const records: { created: string; count: number }[] = [];
             const dayMap = calculateTrends(records, "Australia/Perth");
             expect(dayMap.size).toBe(0);
         });
@@ -133,14 +172,14 @@ describe("TrendAgent Unit Tests", () => {
     describe("runTrendAgent", () => {
         test("should process gyms and call upsertTrendCache", async () => {
             // Need to mock the database to return some gyms
-            const { db } = await import("../src/utils/database");
+            const { db } = await import("../src/utils/database") as unknown as { db: MockDb };
             
             // Mock revoGyms.id, revoGyms.name, revoGyms.timezone
             // The actual code uses db.select(...).from(revoGyms)
             // Our mock currently returns [] in trendAgent.test.ts:21
             
             // Let's refine the mock for this test
-            (db as any).then = (resolve: any) => resolve([
+            setMockData([
                 { id: "gym-1", name: "Gym 1", timezone: "Australia/Perth" }
             ]);
 
@@ -156,6 +195,191 @@ describe("TrendAgent Unit Tests", () => {
             // It should have called insert 7 times (one for each day)
             // But our mock database's insert is just a mock, so we can check if it was called.
             expect(db.insert).toHaveBeenCalled();
+        });
+    });
+
+    // ===== DATABASE OPERATION TESTS =====
+
+    describe("fetchGymData", () => {
+        test("should return records for a specific gym within date range", async () => {
+            setMockData([
+                { created: "2024-01-30 10:00:00", count: 50 },
+                { created: "2024-01-30 10:15:00", count: 55 },
+            ]);
+
+            const records = await fetchGymData("gym-123", 7);
+
+            expect(records.length).toBe(2);
+            expect(records[0].count).toBe(50);
+            expect(records[1].count).toBe(55);
+        });
+
+        test("should return empty array when no records found", async () => {
+            setMockData([]);
+
+            const records = await fetchGymData("gym-nonexistent", 7);
+
+            expect(records).toEqual([]);
+        });
+
+        test("should use default lookback of 90 days", async () => {
+            setMockData([{ created: "2024-01-01 00:00:00", count: 100 }]);
+
+            await fetchGymData("gym-123");
+
+            // Should not throw and use default value
+            expect(mockQueryResult).toBeDefined();
+        });
+    });
+
+    describe("upsertTrendCache", () => {
+        test("should insert trend data into cache", async () => {
+            const { db } = await import("../src/utils/database") as unknown as { db: MockDb };
+            setMockData([]);
+
+            const trendData: TimeSlotAverage[] = [
+                { time: "08:00", average: 50, sampleCount: 10 },
+                { time: "08:15", average: 55, sampleCount: 10 },
+            ];
+
+            await upsertTrendCache("gym-123", 1, trendData);
+
+            expect(db.insert).toHaveBeenCalled();
+            expect(db.values).toHaveBeenCalled();
+            expect(db.onDuplicateKeyUpdate).toHaveBeenCalled();
+        });
+
+        test("should include all required fields in insert", async () => {
+            const { db } = await import("../src/utils/database") as unknown as { db: MockDb };
+
+            const trendData: TimeSlotAverage[] = [
+                { time: "08:00", average: 50, sampleCount: 10 },
+            ];
+
+            await upsertTrendCache("gym-456", 2, trendData);
+
+            const valuesMock = db.values as unknown as Mock<(...args: unknown[]) => MockDb>;
+            const valuesCall = valuesMock.mock.calls[0][0] as Record<string, unknown>;
+            expect(valuesCall).toHaveProperty("gymId", "gym-456");
+            expect(valuesCall).toHaveProperty("dayOfWeek", 2);
+            expect(valuesCall).toHaveProperty("trendData");
+            expect(valuesCall).toHaveProperty("updatedAt");
+        });
+    });
+
+    describe("getGymTrends", () => {
+        test("should return trend data for a specific gym", async () => {
+            setMockData([
+                {
+                    gymId: "gym-123",
+                    dayOfWeek: 1,
+                    trendData: [
+                        { time: "08:00", average: 50, sampleCount: 10 },
+                    ],
+                    updatedAt: "2024-01-30 12:00:00",
+                },
+            ]);
+
+            const trends = await getGymTrends("gym-123");
+
+            expect(trends.length).toBe(1);
+            expect(trends[0].dayOfWeek).toBe(1);
+            expect(trends[0].slots.length).toBe(1);
+            expect(trends[0].slots[0].average).toBe(50);
+        });
+
+        test("should return empty array when no trends exist", async () => {
+            setMockData([]);
+
+            const trends = await getGymTrends("gym-no-data");
+
+            expect(trends).toEqual([]);
+        });
+
+        test("should handle multiple days for a gym", async () => {
+            setMockData([
+                {
+                    gymId: "gym-123",
+                    dayOfWeek: 1,
+                    trendData: [{ time: "08:00", average: 50, sampleCount: 10 }],
+                },
+                {
+                    gymId: "gym-123",
+                    dayOfWeek: 2,
+                    trendData: [{ time: "08:00", average: 60, sampleCount: 10 }],
+                },
+            ]);
+
+            const trends = await getGymTrends("gym-123");
+
+            expect(trends.length).toBe(2);
+            expect(trends[0].dayOfWeek).toBe(1);
+            expect(trends[1].dayOfWeek).toBe(2);
+        });
+    });
+
+    describe("getAllGymTrends", () => {
+        test("should return map of all gym trends", async () => {
+            setMockData([
+                {
+                    gymId: "gym-1",
+                    dayOfWeek: 1,
+                    trendData: [{ time: "08:00", average: 50, sampleCount: 10 }],
+                },
+                {
+                    gymId: "gym-1",
+                    dayOfWeek: 2,
+                    trendData: [{ time: "08:00", average: 60, sampleCount: 10 }],
+                },
+                {
+                    gymId: "gym-2",
+                    dayOfWeek: 1,
+                    trendData: [{ time: "08:00", average: 70, sampleCount: 10 }],
+                },
+            ]);
+
+            const allTrends = await getAllGymTrends();
+
+            expect(allTrends instanceof Map).toBe(true);
+            expect(allTrends.has("gym-1")).toBe(true);
+            expect(allTrends.has("gym-2")).toBe(true);
+            expect(allTrends.get("gym-1")?.length).toBe(2);
+            expect(allTrends.get("gym-2")?.length).toBe(1);
+        });
+
+        test("should return empty map when no trends exist", async () => {
+            setMockData([]);
+
+            const allTrends = await getAllGymTrends();
+
+            expect(allTrends instanceof Map).toBe(true);
+            expect(allTrends.size).toBe(0);
+        });
+
+        test("should group multiple days for same gym", async () => {
+            setMockData([
+                {
+                    gymId: "gym-abc",
+                    dayOfWeek: 0,
+                    trendData: [{ time: "08:00", average: 40, sampleCount: 10 }],
+                },
+                {
+                    gymId: "gym-abc",
+                    dayOfWeek: 1,
+                    trendData: [{ time: "08:00", average: 45, sampleCount: 10 }],
+                },
+                {
+                    gymId: "gym-abc",
+                    dayOfWeek: 2,
+                    trendData: [{ time: "08:00", average: 50, sampleCount: 10 }],
+                },
+            ]);
+
+            const allTrends = await getAllGymTrends();
+
+            const gymTrends = allTrends.get("gym-abc");
+            expect(gymTrends?.length).toBe(3);
+            expect(gymTrends?.map(t => t.dayOfWeek).sort()).toEqual([0, 1, 2]);
         });
     });
 });

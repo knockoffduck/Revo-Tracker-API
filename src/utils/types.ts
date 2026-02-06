@@ -7,4 +7,5 @@ export type GymInfo = {
 	address: string;
 	postcode: number;
 	state: string;
+	squat_racks?: number;
 };

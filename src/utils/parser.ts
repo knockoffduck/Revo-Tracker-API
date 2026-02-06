@@ -118,6 +118,8 @@ export const parseHTML = async () => {
 
 	// Extract counts from the dropdown list which contains all clubs
 	$("a.club-shortname").each((i, el) => {
+        // ...
+
 		const name = $(el).attr("data-club-name");
 		const countStr = $(el).attr("data-member-in-club");
 		if (!name || countStr === undefined) return;
@@ -256,20 +258,27 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			areaSize: gym.size,
 			lastUpdated: currentTime,
 			active: 1 as number,
+			squatRacks: gym.squat_racks ?? 0,
 		};
+
+		const updateSet: any = {
+			name: sql`values(${revoGyms.name})`,
+			address: sql`values(${revoGyms.address})`,
+			postcode: sql`values(${revoGyms.postcode})`,
+			state: sql`values(${revoGyms.state})`,
+			areaSize: sql`values(${revoGyms.areaSize})`,
+			lastUpdated: sql`values(${revoGyms.lastUpdated})`,
+		};
+
+		if (gym.squat_racks !== undefined) {
+			updateSet.squatRacks = sql`values(${revoGyms.squatRacks})`;
+		}
 
 		await db
 			.insert(revoGyms)
 			.values(info)
 			.onDuplicateKeyUpdate({
-				set: {
-					name: sql`values(${revoGyms.name})`,
-					address: sql`values(${revoGyms.address})`,
-					postcode: sql`values(${revoGyms.postcode})`,
-					state: sql`values(${revoGyms.state})`,
-					areaSize: sql`values(${revoGyms.areaSize})`,
-					lastUpdated: sql`values(${revoGyms.lastUpdated})`,
-				},
+				set: updateSet,
 			});
 	}
 };

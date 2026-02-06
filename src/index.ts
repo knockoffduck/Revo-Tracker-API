@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { handleError, handleSuccess } from "./utils/handlers";
 import { insertGymStats, parseHTML, updateGymInfo } from "./utils/parser";
 import { GymInfo } from "./utils/types";
+import { enrichGymData } from "./utils/details";
 import { db } from "./utils/database";
 import { revoGymCount } from "./db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -55,10 +56,14 @@ app.get("/", (c) => {
 });
 
 app.get("/gyms/update", async (c) => {
-  const data = await parseHTML();
+  let data = await parseHTML();
   if (!isGymArray(data)) {
     return handleError(c, { message: "Data is not of type Gym[]" });
   }
+
+  // Fetch squat racks count
+  data = await enrichGymData(data);
+
   await updateGymInfo(data);
   return handleSuccess(c, { message: "Data updated successfully" });
 });

@@ -1,5 +1,4 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
-import { insertGymStats, updateGymInfo } from "../src/utils/parser";
 import { GymInfo } from "../src/utils/types";
 
 // Mock Database
@@ -45,6 +44,7 @@ describe("Parser Database Operations", () => {
     ];
 
     test("updateGymInfo should call db.insert and onDuplicateKeyUpdate", async () => {
+        const { updateGymInfo } = await import("../src/utils/parser");
         await updateGymInfo(sampleGymData);
         
         expect(mockInsert).toHaveBeenCalled();
@@ -53,6 +53,8 @@ describe("Parser Database Operations", () => {
     });
 
     test("insertGymStats should call db.insert for each gym and missing gyms", async () => {
+        const { insertGymStats } = await import("../src/utils/parser");
+        
         // Mock existing gyms to return one gym that is NOT in sampleGymData
         // We need to re-mock 'then' for this specific call or use a different approach.
         // Since we are mocking the module once, we can change the 'then' behavior.

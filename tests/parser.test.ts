@@ -1,5 +1,4 @@
 import { describe, expect, test, mock, beforeAll, afterAll } from "bun:test";
-import { parseHTML } from "../src/utils/parser";
 import axios from "axios";
 import { file } from "bun";
 import path from "path";
@@ -50,6 +49,9 @@ mock.module("../src/utils/database", () => {
 
 describe("Parser tests", () => {
     test("parseHTML should correctly extract gym data from mock HTML", async () => {
+        // Dynamic import to ensure mocks are applied
+        const { parseHTML } = await import("../src/utils/parser");
+        
         const gymData = await parseHTML();
 
         // We expect 3 gyms based on our mock HTML

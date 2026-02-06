@@ -1,4 +1,4 @@
-import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, primaryKey, varchar, datetime, int, double, text, timestamp, unique, tinyint, json } from "drizzle-orm/mysql-core"
+import { mysqlTable, mysqlSchema, AnyMySqlColumn, index, foreignKey, primaryKey, varchar, datetime, int, double, text, tinyint, timestamp, unique, longtext, mysqlEnum, json } from "drizzle-orm/mysql-core"
 import { sql } from "drizzle-orm"
 
 export const revoGymCount = mysqlTable("Revo_Gym_Count", {
@@ -27,6 +27,9 @@ export const revoGyms = mysqlTable("Revo_Gyms", {
 	postcode: int().notNull(),
 	active: tinyint().notNull(),
 	timezone: varchar({ length: 50 }).default('Australia/Perth').notNull(),
+	longitude: double(),
+	latitude: double(),
+	squatRacks: tinyint("Squat Racks", { unsigned: true }).default(0).notNull(),
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "Revo_Gyms_id"}),
@@ -49,6 +52,24 @@ export const account = mysqlTable("account", {
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "account_id"}),
+]);
+
+export const announcements = mysqlTable("announcements", {
+	id: int().autoincrement().notNull(),
+	title: varchar({ length: 255 }).notNull(),
+	slug: varchar({ length: 255 }).notNull(),
+	summary: text(),
+	content: longtext().notNull(),
+	category: mysqlEnum(['feature','fix','update','event']).default('update'),
+	status: mysqlEnum(['draft','published','archived']).default('draft'),
+	authorId: int("author_id"),
+	publishedAt: timestamp("published_at", { mode: 'string' }),
+	createdAt: timestamp("created_at", { mode: 'string' }).defaultNow(),
+	updatedAt: timestamp("updated_at", { mode: 'string' }).defaultNow().onUpdateNow(),
+},
+(table) => [
+	primaryKey({ columns: [table.id], name: "announcements_id"}),
+	unique("slug").on(table.slug),
 ]);
 
 export const biosLinks = mysqlTable("bios_links", {
@@ -130,8 +151,8 @@ export const motherboards = mysqlTable("motherboards", {
 },
 (table) => [
 	primaryKey({ columns: [table.id], name: "motherboards_id"}),
-	unique("mid").on(table.mid),
 	unique("model_name").on(table.modelName),
+	unique("mid").on(table.mid),
 ]);
 
 export const session = mysqlTable("session", {
@@ -167,6 +188,7 @@ export const user = mysqlTable("user", {
 	email: varchar({ length: 255 }).notNull(),
 	emailVerified: tinyint("email_verified").notNull(),
 	image: text(),
+	isAdmin: tinyint("is_admin").default(0),
 	createdAt: timestamp("created_at", { mode: 'string' }).notNull(),
 	updatedAt: timestamp("updated_at", { mode: 'string' }).notNull(),
 	gymPreferences: json("gym_preferences"),
