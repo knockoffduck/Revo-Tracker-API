@@ -49,25 +49,22 @@ const getRotatedCookie = async () => {
 };
 
 const getRotatedProxy = async () => {
-	try {
-		const proxiesContent = await file("Scraper/proxies.json").text();
-		const proxies = JSON.parse(proxiesContent);
-		if (!proxies || proxies.length === 0) return null;
+	// Using Webshare's rotating proxy endpoint
+	const domainName = process.env.DOMAIN_NAME;
+	const proxyPort = process.env.PROXY_PORT;
+	const proxyUsername = process.env.PROXY_USERNAME;
+	const proxyPassword = process.env.PROXY_PASSWORD;
 
-		const randomIndex = Math.floor(Math.random() * proxies.length);
-		const proxyStr = proxies[randomIndex];
-		const parts = proxyStr.split(":");
-
-		// Handle host:port:user:pass -> http://user:pass@host:port
-		if (parts.length >= 4) {
-			return `http://${parts[2]}:${parts[3]}@${parts[0]}:${parts[1]}`;
-		}
-
-		return `http://${parts[0]}:${parts[1]}`;
-	} catch (e) {
-		console.error("Error reading proxies.json.");
+	if (!domainName || !proxyPort || !proxyUsername || !proxyPassword) {
+		console.error("[Parser] Missing proxy environment variables. Falling back to direct connection.");
 		return null;
 	}
+
+	// Construct Webshare rotating proxy URL
+	// Format: http://username:password@domain:port
+	const proxyUrl = `http://${proxyUsername}:${proxyPassword}@${domainName}:${proxyPort}`;
+	console.log(`[Parser] Using Webshare rotating proxy: ${domainName}:${proxyPort}`);
+	return proxyUrl;
 };
 
 const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => {
