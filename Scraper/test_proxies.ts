@@ -3,6 +3,12 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import * as cheerio from "cheerio";
 import { file } from "bun";
 
+const isInsecureTlsEnabled = () => {
+	const flag = process.env.PROXY_INSECURE_TLS;
+	if (!flag) return false;
+	return flag === "1" || flag.toLowerCase() === "true";
+};
+
 const getRotatedCookie = async () => {
 	try {
 		const cookiesContent = await file("Scraper/cookies.json").text();
@@ -40,6 +46,10 @@ const testSingleProxy = async (proxyStr: string, cookie: string) => {
 	}
 
 	const agent = new HttpsProxyAgent(proxyUrl);
+	if (isInsecureTlsEnabled()) {
+		agent.options.rejectUnauthorized = false;
+		console.warn("[ProxyTest] TLS verification disabled for proxy requests.");
+	}
 	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
 
 	console.log(`\nTesting Proxy: ${parts[0]}:${parts[1]}${parts.length >= 4 ? " (With Auth)" : ""}...`);

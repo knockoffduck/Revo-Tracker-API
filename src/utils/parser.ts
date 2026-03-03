@@ -1,5 +1,4 @@
 import axios from "axios";
-import { HttpsProxyAgent } from "https-proxy-agent";
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { file } from "bun";
@@ -8,6 +7,7 @@ import { revoGymCount, revoGyms } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { getProxyConfig } from "./proxy";
 
 const refreshCookies = async () => {
 	try {
@@ -48,30 +48,10 @@ const getRotatedCookie = async () => {
 	}
 };
 
-const getRotatedProxy = async () => {
-	// Using Webshare's rotating proxy endpoint
-	const domainName = process.env.DOMAIN_NAME;
-	const proxyPort = process.env.PROXY_PORT;
-	const proxyUsername = process.env.PROXY_USERNAME;
-	const proxyPassword = process.env.PROXY_PASSWORD;
-
-	if (!domainName || !proxyPort || !proxyUsername || !proxyPassword) {
-		console.error("[Parser] Missing proxy environment variables. Falling back to direct connection.");
-		return null;
-	}
-
-	// Construct Webshare rotating proxy URL
-	// Format: http://username:password@domain:port
-	const proxyUrl = `http://${proxyUsername}:${proxyPassword}@${domainName}:${proxyPort}`;
-	console.log(`[Parser] Using Webshare rotating proxy: ${domainName}:${proxyPort}`);
-	return proxyUrl;
-};
-
 const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => {
 	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
 	const cookie = await getRotatedCookie();
-	const proxy = await getRotatedProxy();
-	const agent = proxy ? new HttpsProxyAgent(proxy) : undefined;
+	const { httpsAgent, proxyLabel } = getProxyConfig("Parser");
 
 	const startTime = Date.now();
 	try {
@@ -83,18 +63,18 @@ const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => 
 				"user-agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15",
 			},
-			httpsAgent: agent,
+			httpsAgent,
 			proxy: false, // Tell axios not to use its own proxy logic
 			timeout: 10000,
 		});
 		const duration = Date.now() - startTime;
 		console.log(
-			`Fetched data successfully via proxy: ${proxy || "Direct Connection"} (${duration}ms)`
+			`Fetched data successfully via proxy: ${proxyLabel} (${duration}ms)`
 		);
 		return cheerio.load(response.data);
 	} catch (e: any) {
 		if (retries > 0) {
-			console.log(`Proxy failed (${proxy || "Direct"}), retrying... (${retries} left)`);
+			console.log(`Proxy failed (${proxyLabel}), retrying... (${retries} left)`);
 			return fetchPHPData(retries - 1);
 		}
 		console.error("Error fetching PHP data after all retries:", e.message);

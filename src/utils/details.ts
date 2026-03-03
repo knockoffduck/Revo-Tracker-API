@@ -1,6 +1,7 @@
 import axios from "axios";
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
+import { getProxyConfig } from "./proxy";
 
 const getSlug = (name: string): string => {
 	// Special case for OConnor -> oconnor (removing CamelCase/apostrophe implication issues if any, but based on gyms.json it is "OConnor")
@@ -15,6 +16,7 @@ const getSlug = (name: string): string => {
 export const getSquatRacksCount = async (gymName: string): Promise<number | null> => {
 	const slug = getSlug(gymName);
 	const url = `https://revofitness.com.au/gyms/${slug}/`;
+	const { httpsAgent, proxyLabel } = getProxyConfig("Details");
 
 	try {
 		const { data } = await axios.get(url, {
@@ -23,7 +25,9 @@ export const getSquatRacksCount = async (gymName: string): Promise<number | null
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 				Accept: "text/html",
 			},
-            timeout: 10000,
+			httpsAgent,
+			proxy: false,
+			timeout: 10000,
 		});
 
 		const $ = cheerio.load(data);
@@ -47,7 +51,10 @@ export const getSquatRacksCount = async (gymName: string): Promise<number | null
 
 		return squatCount;
 	} catch (error) {
-		console.warn(`[Details] Failed to fetch details for ${gymName} (${url}):`, error instanceof Error ? error.message : error);
+		console.warn(
+			`[Details] Failed to fetch details for ${gymName} via ${proxyLabel} (${url}):`,
+			error instanceof Error ? error.message : error
+		);
 		return null;
 	}
 };
