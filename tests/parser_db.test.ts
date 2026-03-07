@@ -55,28 +55,73 @@ describe("Parser Database Operations", () => {
     test("insertGymStats should call db.insert for each gym and missing gyms", async () => {
         const { insertGymStats } = await import("../src/utils/parser");
         
-        // Mock existing gyms to return one gym that is NOT in sampleGymData
-        // We need to re-mock 'then' for this specific call or use a different approach.
-        // Since we are mocking the module once, we can change the 'then' behavior.
-        
         let selectCalled = false;
         mockDb.then = (resolve: any) => {
             if (!selectCalled) {
                 selectCalled = true;
-                return resolve([{ name: "Missing Gym", postcode: 6001 }]); // existing gyms list
+                return resolve([{ id: "missing-1", name: "Missing Gym", postcode: 6001, active: 1, areaSize: 0, address: "", state: "WA", squatRacks: 0 }]);
             }
             return resolve([]);
         };
 
         await insertGymStats(sampleGymData);
-
-        // Should be called for Test Gym AND Missing Gym (total 2)
-        // Wait, the logic in insertGymStats:
-        // for (const gym of gymData) { ... db.insert ... }
-        // const missingGyms = gymList.filter(...)
-        // for (const gym of missingGyms) { ... db.insert ... }
         
         expect(mockInsert).toHaveBeenCalled();
         expect(mockInsert).toHaveBeenCalledTimes(2);
+    });
+
+    test("insertGymStats should write O'Connor counts to the canonical OConnor gym row", async () => {
+        const { insertGymStats } = await import("../src/utils/parser");
+
+        mockDb.then = (resolve: any) => resolve([
+            { id: "15749878", name: "OConnor", postcode: 6163, active: 1, areaSize: 1480, address: "5 Stockdale Rd, O’Connor WA 6163", state: "WA", squatRacks: 5 },
+            { id: "5852969", name: "O'Connor", postcode: 0, active: 0, areaSize: 0, address: "Pending Update", state: "Unknown", squatRacks: 0 },
+        ]);
+
+        await insertGymStats([
+            {
+                name: "O'Connor",
+                address: "Pending Update",
+                postcode: 0,
+                state: "Unknown",
+                size: 0,
+                member_count: 20,
+                member_ratio: 0,
+                percentage: 0,
+            }
+        ]);
+
+        const firstInsert = mockValues.mock.calls[0][0];
+        expect(firstInsert.gymId).toBe("15749878");
+        expect(firstInsert.gymName).toBe("OConnor");
+        expect(firstInsert.ratio).toBe(74);
+    });
+
+    test("updateGymInfo should preserve the canonical OConnor gym row", async () => {
+        const { updateGymInfo } = await import("../src/utils/parser");
+
+        mockDb.then = (resolve: any) => resolve([
+            { id: "15749878", name: "OConnor", postcode: 6163, active: 1, areaSize: 1480, address: "5 Stockdale Rd, O’Connor WA 6163", state: "WA", squatRacks: 5 },
+            { id: "5852969", name: "O'Connor", postcode: 0, active: 0, areaSize: 0, address: "Pending Update", state: "Unknown", squatRacks: 0 },
+        ]);
+
+        await updateGymInfo([
+            {
+                name: "O'Connor",
+                address: "Pending Update",
+                postcode: 0,
+                state: "Unknown",
+                size: 0,
+                member_count: 20,
+                member_ratio: 0,
+                percentage: 0,
+            }
+        ]);
+
+        const firstUpsert = mockValues.mock.calls[0][0];
+        expect(firstUpsert.id).toBe("15749878");
+        expect(firstUpsert.name).toBe("OConnor");
+        expect(firstUpsert.postcode).toBe(6163);
+        expect(firstUpsert.address).toContain("Stockdale Rd");
     });
 });

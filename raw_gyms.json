@@ -1,0 +1,742 @@
+[
+  {
+    "name": "Ballarat",
+    "address": "Level 1, 1-15 Bridge Mall, Ballarat VIC 3350",
+    "postcode": 3350,
+    "size": 1500,
+    "state": "VIC",
+    "member_count": 8,
+    "member_ratio": 187.5,
+    "percentage": 0
+  },
+  {
+    "name": "Braybrook",
+    "address": "2/330 Ballarat Rd, Braybrook VIC 3019",
+    "postcode": 3019,
+    "size": 1570,
+    "state": "VIC",
+    "member_count": 44,
+    "member_ratio": 35.68181818181818,
+    "percentage": 40.53030303030304
+  },
+  {
+    "name": "Chadstone",
+    "address": "First Floor, Tenancy No 7 675-685 Warrigal Road Chadstone VIC 3148",
+    "postcode": 3148,
+    "size": 1870,
+    "state": "VIC",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Cranbourne",
+    "address": "18/350 - 398 South Gippsland Hwy, Cranbourne VIC 3977",
+    "postcode": 3977,
+    "size": 1700,
+    "state": "VIC",
+    "member_count": 54,
+    "member_ratio": 31.48148148148148,
+    "percentage": 47.53086419753087
+  },
+  {
+    "name": "Epping",
+    "address": "20 Jovic Road Epping VIC 3076",
+    "postcode": 3076,
+    "size": 1635,
+    "state": "VIC",
+    "member_count": 24,
+    "member_ratio": 68.125,
+    "percentage": 0
+  },
+  {
+    "name": "Frankston",
+    "address": "Level Two, Shop O0001 Bayside Centre, 28 Beach St, Frankston VIC 3199",
+    "postcode": 3199,
+    "size": 2700,
+    "state": "VIC",
+    "member_count": 39,
+    "member_ratio": 69.23076923076923,
+    "percentage": 0
+  },
+  {
+    "name": "Hoppers Crossing",
+    "address": "Tenancy 2/57-69 Forsyth Rd, Hoppers Crossing VIC 3029",
+    "postcode": 3029,
+    "size": 1900,
+    "state": "VIC",
+    "member_count": 48,
+    "member_ratio": 39.583333333333336,
+    "percentage": 34.02777777777778
+  },
+  {
+    "name": "Knoxfield",
+    "address": "Tenancy 6, 1464 Ferntree Gully Rd, Knoxfield 3180",
+    "postcode": 3180,
+    "size": 1180,
+    "state": "VIC",
+    "member_count": 45,
+    "member_ratio": 26.22222222222222,
+    "percentage": 56.2962962962963
+  },
+  {
+    "name": "Langwarrin",
+    "address": "Shop MM01, The Gateway, 230 Cranbourne-Frankston Rd, Langwarrin VIC 3910",
+    "postcode": 3910,
+    "size": 1500,
+    "state": "VIC",
+    "member_count": 31,
+    "member_ratio": 48.38709677419355,
+    "percentage": 19.354838709677413
+  },
+  {
+    "name": "Maribyrnong",
+    "address": "Shop L07 6300, Highpoint Shopping Centre 120-200 Rosamond Rd, Maribyrnong VIC 3032",
+    "postcode": 3032,
+    "size": 2120,
+    "state": "VIC",
+    "member_count": 44,
+    "member_ratio": 48.18181818181818,
+    "percentage": 19.696969696969703
+  },
+  {
+    "name": "Mentone",
+    "address": "3 Nepean Highway, Mentone VIC 3194",
+    "postcode": 3194,
+    "size": 1800,
+    "state": "VIC",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Moorabbin Airport",
+    "address": "Kingston Central Plaza, 6A / 288 Centre Dandenong Rd, Moorabbin Airport VIC 3194",
+    "postcode": 3194,
+    "size": 1930,
+    "state": "VIC",
+    "member_count": 49,
+    "member_ratio": 39.38775510204081,
+    "percentage": 34.353741496598644
+  },
+  {
+    "name": "Narre Warren",
+    "address": "Westfield Fountain Gate Shop 6, 8 Overland Dr, Narre Warren VIC 3805",
+    "postcode": 3805,
+    "size": 1000,
+    "state": "VIC",
+    "member_count": 28,
+    "member_ratio": 35.714285714285715,
+    "percentage": 40.476190476190474
+  },
+  {
+    "name": "Noble Park",
+    "address": "Unit 5, 450 Princes Highway, Noble Park 3174",
+    "postcode": 3174,
+    "size": 1600,
+    "state": "VIC",
+    "member_count": 34,
+    "member_ratio": 47.05882352941177,
+    "percentage": 21.568627450980383
+  },
+  {
+    "name": "Nunawading",
+    "address": "MM001 288 Whitehorse Rd, Nunawading VIC 3131",
+    "postcode": 3131,
+    "size": 2500,
+    "state": "VIC",
+    "member_count": 99,
+    "member_ratio": 25.252525252525253,
+    "percentage": 57.91245791245792
+  },
+  {
+    "name": "Nunawading - (Original)",
+    "address": "Pending Update",
+    "postcode": 0,
+    "size": 0,
+    "state": "Unknown",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Plenty Valley",
+    "address": "415 McDonalds Rd, Mill Park VIC 3082",
+    "postcode": 3082,
+    "size": 1600,
+    "state": "VIC",
+    "member_count": 30,
+    "member_ratio": 53.333333333333336,
+    "percentage": 11.111111111111105
+  },
+  {
+    "name": "Richmond",
+    "address": "101-103 Palmer Street Richmond VIC 3121",
+    "postcode": 3121,
+    "size": 1830,
+    "state": "VIC",
+    "member_count": 32,
+    "member_ratio": 57.1875,
+    "percentage": 4.6875
+  },
+  {
+    "name": "Southland",
+    "address": "Level 1, Shop M2 (opposite Coles), 1239 Nepean Highway, Cheltenham 3192 VIC",
+    "postcode": 3192,
+    "size": 1160,
+    "state": "VIC",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Springvale",
+    "address": "Shop T4 Ouson Plaza 754-768 Princes Highway Springvale VIC 3171",
+    "postcode": 3171,
+    "size": 2100,
+    "state": "VIC",
+    "member_count": 72,
+    "member_ratio": 29.166666666666668,
+    "percentage": 51.388888888888886
+  },
+  {
+    "name": "Castle Hill",
+    "address": "Pending Update",
+    "postcode": 0,
+    "size": 0,
+    "state": "Unknown",
+    "member_count": 29,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Charlestown",
+    "address": "(Under Food Court) Shop G 8042, Charlestown Square 30 Pearson St, Charlestown 2290",
+    "postcode": 2290,
+    "size": 1215,
+    "state": "NSW",
+    "member_count": 11,
+    "member_ratio": 110.45454545454545,
+    "percentage": 0
+  },
+  {
+    "name": "Jesmond",
+    "address": "Pending Update",
+    "postcode": 0,
+    "size": 0,
+    "state": "Unknown",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Pitt St",
+    "address": "Westfield Sydney Shop 5001/Level 5, 188 Pitt St, Sydney 2000",
+    "postcode": 2000,
+    "size": 975,
+    "state": "NSW",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Shellharbour",
+    "address": "Rooftop carpark off College Ave, Shop 3000 Stockland Shellharbour Shopping Centre, 211 Lake Entrance Rd, Shellharbour 2529",
+    "postcode": 2529,
+    "size": 1000,
+    "state": "NSW",
+    "member_count": 7,
+    "member_ratio": 142.85714285714286,
+    "percentage": 0
+  },
+  {
+    "name": "Angle Vale",
+    "address": "Pending Update",
+    "postcode": 0,
+    "size": 0,
+    "state": "Unknown",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Beverley",
+    "address": "131 Grange Road, Beverley, SA 5009",
+    "postcode": 5009,
+    "size": 1570,
+    "state": "SA",
+    "member_count": 49,
+    "member_ratio": 32.04081632653061,
+    "percentage": 46.59863945578232
+  },
+  {
+    "name": "Blair Athol",
+    "address": "338 – 340 Main North Road, Blair Athol SA 5084",
+    "postcode": 5084,
+    "size": 1530,
+    "state": "SA",
+    "member_count": 50,
+    "member_ratio": 30.6,
+    "percentage": 49
+  },
+  {
+    "name": "Blakeview",
+    "address": "62 Main Terrace, Blakeview, SA 5114",
+    "postcode": 5114,
+    "size": 1600,
+    "state": "SA",
+    "member_count": 33,
+    "member_ratio": 48.484848484848484,
+    "percentage": 19.191919191919194
+  },
+  {
+    "name": "Glenelg",
+    "address": "Bayside Village Shopping Centre Level 1, Crn of Brighton Rd & Jetty Rd, Glenelg, SA 5045",
+    "postcode": 5045,
+    "size": 2000,
+    "state": "SA",
+    "member_count": 59,
+    "member_ratio": 33.898305084745765,
+    "percentage": 43.50282485875706
+  },
+  {
+    "name": "Happy Valley",
+    "address": "Shop 18 Valley Central Shopping Centre 50 Kenihans Rd, Happy Valley SA 5159",
+    "postcode": 5159,
+    "size": 1020,
+    "state": "SA",
+    "member_count": 20,
+    "member_ratio": 51,
+    "percentage": 15.000000000000002
+  },
+  {
+    "name": "Marion",
+    "address": "838 Marion Road, Marion, SA 5043",
+    "postcode": 5043,
+    "size": 1500,
+    "state": "SA",
+    "member_count": 40,
+    "member_ratio": 37.5,
+    "percentage": 37.5
+  },
+  {
+    "name": "Modbury",
+    "address": "Westfield Tea Tree Plus, 976 North East Road, Modbury SA 5092",
+    "postcode": 5092,
+    "size": 1450,
+    "state": "SA",
+    "member_count": 44,
+    "member_ratio": 32.95454545454545,
+    "percentage": 45.07575757575758
+  },
+  {
+    "name": "Munno Para",
+    "address": "Pending Update",
+    "postcode": 0,
+    "size": 0,
+    "state": "Unknown",
+    "member_count": 0,
+    "member_ratio": 0,
+    "percentage": 0
+  },
+  {
+    "name": "Parafield",
+    "address": "Tenancy 3, 12 Nobby Buckley Drive, Parafield SA 5106",
+    "postcode": 5106,
+    "size": 2000,
+    "state": "SA",
+    "member_count": 62,
+    "member_ratio": 32.25806451612903,
+    "percentage": 46.23655913978495
+  },
+  {
+    "name": "Salisbury Downs",
+    "address": "1-9 Hollywood Boulevard Salisbury Downs SA 5108",
+    "postcode": 5108,
+    "size": 2000,
+    "state": "SA",
+    "member_count": 54,
+    "member_ratio": 37.03703703703704,
+    "percentage": 38.27160493827161
+  },
+  {
+    "name": "Seaford Meadows",
+    "address": "Tenancy 3, 19-25 Seaford Rd, Seaford Meadows SA 5169",
+    "postcode": 5169,
+    "size": 1500,
+    "state": "SA",
+    "member_count": 39,
+    "member_ratio": 38.46153846153846,
+    "percentage": 35.897435897435905
+  },
+  {
+    "name": "Windsor Gardens",
+    "address": "3/424 North East Road, Windsor Gardens, SA 5087",
+    "postcode": 5087,
+    "size": 3000,
+    "state": "SA",
+    "member_count": 54,
+    "member_ratio": 55.55555555555556,
+    "percentage": 7.4074074074074066
+  },
+  {
+    "name": "Woodcroft",
+    "address": "Shop 2, Woodcroft Town Centre, Cnr Bains & Panalatinga Rds, Morphett Vale SA 5162",
+    "postcode": 5162,
+    "size": 1598,
+    "state": "SA",
+    "member_count": 25,
+    "member_ratio": 63.92,
+    "percentage": 0
+  },
+  {
+    "name": "Woodville",
+    "address": "802-804 Port Road, Woodville South SA 5011",
+    "postcode": 5011,
+    "size": 1100,
+    "state": "SA",
+    "member_count": 28,
+    "member_ratio": 39.285714285714285,
+    "percentage": 34.523809523809526
+  },
+  {
+    "name": "Australind",
+    "address": "Unit 1, 11 The Promenade, Australind Western Australia 6233",
+    "postcode": 6233,
+    "size": 1200,
+    "state": "WA",
+    "member_count": 19,
+    "member_ratio": 63.1578947368421,
+    "percentage": 0
+  },
+  {
+    "name": "Balcatta",
+    "address": "2/39 Erindale Road, Balcatta WA 6021",
+    "postcode": 6021,
+    "size": 1180,
+    "state": "WA",
+    "member_count": 47,
+    "member_ratio": 25.106382978723403,
+    "percentage": 58.156028368794324
+  },
+  {
+    "name": "Banksia Grove",
+    "address": "7 Honeybee Parade Banksia Grove WA 6031",
+    "postcode": 6031,
+    "size": 1100,
+    "state": "WA",
+    "member_count": 14,
+    "member_ratio": 78.57142857142857,
+    "percentage": 0
+  },
+  {
+    "name": "Belmont",
+    "address": "Lot 7, 227 Belmont Avenue Cloverdale WA 6105",
+    "postcode": 6105,
+    "size": 1050,
+    "state": "WA",
+    "member_count": 22,
+    "member_ratio": 47.72727272727273,
+    "percentage": 20.45454545454546
+  },
+  {
+    "name": "Bunbury",
+    "address": "27 Spencer Street, Bunbury WA 6230",
+    "postcode": 6230,
+    "size": 1580,
+    "state": "WA",
+    "member_count": 14,
+    "member_ratio": 112.85714285714286,
+    "percentage": 0
+  },
+  {
+    "name": "Butler",
+    "address": "160 Butler Boulevard, Butler WA 6036",
+    "postcode": 6036,
+    "size": 1430,
+    "state": "WA",
+    "member_count": 45,
+    "member_ratio": 31.77777777777778,
+    "percentage": 47.03703703703703
+  },
+  {
+    "name": "Canning Vale",
+    "address": "888 Nicholson Rd, Canning Vale WA 6155",
+    "postcode": 6155,
+    "size": 2000,
+    "state": "WA",
+    "member_count": 84,
+    "member_ratio": 23.80952380952381,
+    "percentage": 60.317460317460316
+  },
+  {
+    "name": "Cannington",
+    "address": "Rooftop Entry off Grose Avenue, Westfield Carousel, 1382 Albany Hwy, Cannington WA 6107",
+    "postcode": 6107,
+    "size": 2700,
+    "state": "WA",
+    "member_count": 89,
+    "member_ratio": 30.337078651685392,
+    "percentage": 49.43820224719101
+  },
+  {
+    "name": "Claremont",
+    "address": "3 Davies Road, Claremont WA, 6010",
+    "postcode": 6010,
+    "size": 1370,
+    "state": "WA",
+    "member_count": 67,
+    "member_ratio": 20.44776119402985,
+    "percentage": 65.92039800995025
+  },
+  {
+    "name": "Clarkson",
+    "address": "19 Neerabup Rd, Clarkson WA 6030",
+    "postcode": 6030,
+    "size": 1000,
+    "state": "WA",
+    "member_count": 24,
+    "member_ratio": 41.666666666666664,
+    "percentage": 30.555555555555557
+  },
+  {
+    "name": "Cockburn",
+    "address": "4/660 Beeliar Drive, Cockburn",
+    "postcode": 6164,
+    "size": 1000,
+    "state": "WA",
+    "member_count": 38,
+    "member_ratio": 26.31578947368421,
+    "percentage": 56.14035087719298
+  },
+  {
+    "name": "Ellenbrook",
+    "address": "Tenancy 1, 186 The Promenade, Ellenbrook WA 6069",
+    "postcode": 6069,
+    "size": 1760,
+    "state": "WA",
+    "member_count": 53,
+    "member_ratio": 33.20754716981132,
+    "percentage": 44.65408805031446
+  },
+  {
+    "name": "Girrawheen",
+    "address": "Shop 6M Hawaiian's Newpark Shopping Centre, 64 Marangaroo Dr, Girrawheen 6064",
+    "postcode": 6064,
+    "size": 1360,
+    "state": "WA",
+    "member_count": 51,
+    "member_ratio": 26.666666666666668,
+    "percentage": 55.55555555555556
+  },
+  {
+    "name": "Innaloo",
+    "address": "37 Ellen Stirling Blvd, Innaloo WA 6018",
+    "postcode": 6018,
+    "size": 1767,
+    "state": "WA",
+    "member_count": 68,
+    "member_ratio": 25.985294117647058,
+    "percentage": 56.69117647058823
+  },
+  {
+    "name": "Joondalup",
+    "address": "70/75 Joondalup Drive, Joondalup WA 6027",
+    "postcode": 6027,
+    "size": 1990,
+    "state": "WA",
+    "member_count": 66,
+    "member_ratio": 30.151515151515152,
+    "percentage": 49.747474747474755
+  },
+  {
+    "name": "Kelmscott",
+    "address": "2 Page Rd, Kelmscott WA 6111",
+    "postcode": 6111,
+    "size": 760,
+    "state": "WA",
+    "member_count": 17,
+    "member_ratio": 44.705882352941174,
+    "percentage": 25.49019607843138
+  },
+  {
+    "name": "Kwinana",
+    "address": "Kwinana Supa Centre 46 Meares Avenue, Kwinana Town Centre, WA 6167",
+    "postcode": 6167,
+    "size": 1350,
+    "state": "WA",
+    "member_count": 39,
+    "member_ratio": 34.61538461538461,
+    "percentage": 42.307692307692314
+  },
+  {
+    "name": "Malaga",
+    "address": "Units 5-6/637 Marshall Road, Malaga 6090",
+    "postcode": 6090,
+    "size": 2000,
+    "state": "WA",
+    "member_count": 66,
+    "member_ratio": 30.303030303030305,
+    "percentage": 49.494949494949495
+  },
+  {
+    "name": "Mandurah",
+    "address": "105 Reserve Drive Mandurah WA 6210",
+    "postcode": 6210,
+    "size": 2260,
+    "state": "WA",
+    "member_count": 41,
+    "member_ratio": 55.1219512195122,
+    "percentage": 8.130081300813007
+  },
+  {
+    "name": "Midland",
+    "address": "4 Clayton St, Midland, 6056",
+    "postcode": 6056,
+    "size": 1410,
+    "state": "WA",
+    "member_count": 35,
+    "member_ratio": 40.285714285714285,
+    "percentage": 32.85714285714286
+  },
+  {
+    "name": "Mirrabooka",
+    "address": "15 Chesterfield Rd, Mirrabooka WA 6061",
+    "postcode": 6061,
+    "size": 2400,
+    "state": "WA",
+    "member_count": 60,
+    "member_ratio": 40,
+    "percentage": 33.333333333333336
+  },
+  {
+    "name": "Morley",
+    "address": "Shop 10, Morley Gateway Shopping Centre, 60 Russell Street, Morley WA 6062",
+    "postcode": 6062,
+    "size": 1800,
+    "state": "WA",
+    "member_count": 60,
+    "member_ratio": 30,
+    "percentage": 50
+  },
+  {
+    "name": "Mount Hawthorn",
+    "address": "363 Oxford St, Mount Hawthorn, 6016",
+    "postcode": 6016,
+    "size": 875,
+    "state": "WA",
+    "member_count": 50,
+    "member_ratio": 17.5,
+    "percentage": 70.83333333333333
+  },
+  {
+    "name": "Myaree",
+    "address": "101 North Lake Road, Myaree WA, 6154",
+    "postcode": 6154,
+    "size": 1550,
+    "state": "WA",
+    "member_count": 93,
+    "member_ratio": 16.666666666666668,
+    "percentage": 72.22222222222221
+  },
+  {
+    "name": "North Beach",
+    "address": "1 North Beach Road, North Beach WA 6020",
+    "postcode": 6020,
+    "size": 1025,
+    "state": "WA",
+    "member_count": 40,
+    "member_ratio": 25.625,
+    "percentage": 57.29166666666667
+  },
+  {
+    "name": "Northbridge",
+    "address": "63 John St, Northbridge WA, 6003",
+    "postcode": 6003,
+    "size": 865,
+    "state": "WA",
+    "member_count": 32,
+    "member_ratio": 27.03125,
+    "percentage": 54.94791666666667
+  },
+  {
+    "name": "OConnor",
+    "address": "5 Stockdale Rd, O’Connor WA 6163",
+    "postcode": 6163,
+    "size": 1480,
+    "state": "WA",
+    "member_count": 33,
+    "member_ratio": 44.84848484848485,
+    "percentage": 25.25252525252525
+  },
+  {
+    "name": "Rivervale",
+    "address": "1/93 Francisco Street, Rivervale WA 6103",
+    "postcode": 6103,
+    "size": 1800,
+    "state": "WA",
+    "member_count": 74,
+    "member_ratio": 24.324324324324323,
+    "percentage": 59.45945945945946
+  },
+  {
+    "name": "Rockingham",
+    "address": "Shop G109B, Rockingham Shopping Centre, 1 Council Ave, Rockingham WA 6168",
+    "postcode": 6168,
+    "size": 2400,
+    "state": "WA",
+    "member_count": 70,
+    "member_ratio": 34.285714285714285,
+    "percentage": 42.85714285714286
+  },
+  {
+    "name": "Scarborough",
+    "address": "241 West Coast Highway, Scarborough WA, 6019",
+    "postcode": 6019,
+    "size": 2000,
+    "state": "WA",
+    "member_count": 68,
+    "member_ratio": 29.41176470588235,
+    "percentage": 50.98039215686274
+  },
+  {
+    "name": "Victoria Park",
+    "address": "341 Albany Hwy, Victoria Park WA 6100",
+    "postcode": 6100,
+    "size": 1100,
+    "state": "WA",
+    "member_count": 52,
+    "member_ratio": 21.153846153846153,
+    "percentage": 64.74358974358975
+  },
+  {
+    "name": "Wanneroo",
+    "address": "50 Mowatt Close, Wanneroo, WA 6065",
+    "postcode": 6065,
+    "size": 2000,
+    "state": "WA",
+    "member_count": 56,
+    "member_ratio": 35.714285714285715,
+    "percentage": 40.476190476190474
+  },
+  {
+    "name": "Warwick",
+    "address": "Shop MM003 Warwick Grove Shopping Centre, Cnr Beach & Erindale Rd, Warwick WA 6024",
+    "postcode": 6024,
+    "size": 1160,
+    "state": "WA",
+    "member_count": 31,
+    "member_ratio": 37.41935483870968,
+    "percentage": 37.634408602150536
+  },
+  {
+    "name": "Woodbridge",
+    "address": "380 Great Eastern Highway, Woodbridge WA 6056",
+    "postcode": 6056,
+    "size": 900,
+    "state": "WA",
+    "member_count": 32,
+    "member_ratio": 28.125,
+    "percentage": 53.125
+  }
+]

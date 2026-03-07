@@ -1,4 +1,3 @@
-import axios from "axios";
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { file } from "bun";
@@ -7,7 +6,7 @@ import { revoGymCount, revoGyms } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
-import { getProxyConfig } from "./proxy";
+import { axiosGetWithProxyFallback } from "./proxy";
 
 const refreshCookies = async () => {
 	try {
@@ -51,11 +50,10 @@ const getRotatedCookie = async () => {
 const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => {
 	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
 	const cookie = await getRotatedCookie();
-	const { httpsAgent, proxyLabel } = getProxyConfig("Parser");
 
 	const startTime = Date.now();
 	try {
-		const response = await axios.get(url, {
+		const response = await axiosGetWithProxyFallback<string>("Parser", url, {
 			headers: {
 				accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 				cookie: cookie,
@@ -63,23 +61,118 @@ const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => 
 				"user-agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15",
 			},
-			httpsAgent,
-			proxy: false, // Tell axios not to use its own proxy logic
 			timeout: 10000,
 		});
 		const duration = Date.now() - startTime;
-		console.log(
-			`Fetched data successfully via proxy: ${proxyLabel} (${duration}ms)`
-		);
+		console.log(`[Parser] Fetched data successfully (${duration}ms)`);
 		return cheerio.load(response.data);
 	} catch (e: any) {
 		if (retries > 0) {
-			console.log(`Proxy failed (${proxyLabel}), retrying... (${retries} left)`);
+			console.log(`[Parser] Fetch failed, retrying... (${retries} left)`);
 			return fetchPHPData(retries - 1);
 		}
-		console.error("Error fetching PHP data after all retries:", e.message);
+		console.error("[Parser] Error fetching PHP data after all retries:", e.message);
 		return null;
 	}
+};
+
+const normalizeGymName = (name: string) => {
+	return name
+		.normalize("NFKD")
+		.replace(/[’']/g, "")
+		.replace(/\s+/g, " ")
+		.trim()
+		.toLowerCase();
+};
+
+const getGymMetadataScore = (gym: {
+	active?: number | null;
+	postcode?: number | null;
+	areaSize?: number | null;
+	address?: string | null;
+}) => {
+	let score = 0;
+
+	if ((gym.active ?? 0) > 0) score += 100;
+	if ((gym.postcode ?? 0) > 0) score += 10;
+	if ((gym.areaSize ?? 0) > 0) score += 10;
+	if (gym.address && gym.address !== "Pending Update") score += 10;
+
+	return score;
+};
+
+const buildGymsByNormalizedName = (
+	gyms: Array<{
+		id: string;
+		name: string;
+		address: string;
+		postcode: number;
+		state: string;
+		areaSize: number;
+		active: number;
+		squatRacks?: number;
+	}>
+) => {
+	const gymsByNormalizedName = new Map<string, (typeof gyms)[number]>();
+
+	for (const gym of gyms) {
+		const normalizedName = normalizeGymName(gym.name);
+		const existingGym = gymsByNormalizedName.get(normalizedName);
+
+		if (
+			!existingGym ||
+			getGymMetadataScore(gym) > getGymMetadataScore(existingGym)
+		) {
+			gymsByNormalizedName.set(normalizedName, gym);
+		}
+	}
+
+	return gymsByNormalizedName;
+};
+
+const calculateGymRatios = (size: number, count: number) => {
+	if (size <= 0 || count <= 0) {
+		return { memberRatio: 0, percentage: 0 };
+	}
+
+	const memberRatio = size / count;
+	const percentage = (1 - (memberRatio > 60 ? 60 : memberRatio) / 60) * 100;
+	return { memberRatio, percentage };
+};
+
+const extractClubCounts = ($: cheerio.CheerioAPI) => {
+	const scripts = $("script")
+		.map((_, el) => $(el).html() || "")
+		.get();
+
+	for (const script of scripts) {
+		const match = script.match(/var\s+clubCounterLists\s*=\s*(\{[\s\S]*?\})\s*;/);
+		if (!match) continue;
+
+		try {
+			const clubCounterLists = JSON.parse(match[1]) as Record<
+				string,
+				{ name?: string; shortname?: string; in_club?: string | number }
+			>;
+
+			return Object.values(clubCounterLists)
+				.map((club) => ({
+					name: String(club.name ?? club.shortname ?? "").replace(/\s+/g, " ").trim(),
+					count: Number(club.in_club),
+				}))
+				.filter((club) => club.name && Number.isFinite(club.count));
+		} catch (error) {
+			console.warn("[Parser] Failed to parse clubCounterLists JSON, falling back to DOM parsing.", error);
+		}
+	}
+
+	return $("a.club-shortname")
+		.map((_, el) => ({
+			name: String($(el).attr("data-club-name") ?? "").replace(/\s+/g, " ").trim(),
+			count: Number($(el).attr("data-member-in-club")),
+		}))
+		.get()
+		.filter((club) => club.name && Number.isFinite(club.count));
 };
 
 export const parseHTML = async () => {
@@ -91,41 +184,38 @@ export const parseHTML = async () => {
 	}
 
 	const existingGyms = await db.select().from(revoGyms);
+	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
+	const clubCounts = extractClubCounts($);
 
-	// Extract counts from the dropdown list which contains all clubs
-	$("a.club-shortname").each((i, el) => {
-        // ...
-
-		const name = $(el).attr("data-club-name");
-		const countStr = $(el).attr("data-member-in-club");
-		if (!name || countStr === undefined) return;
-
-		const memberCount = Number(countStr);
+	for (const club of clubCounts) {
+		const scrapedName = club.name;
+		const memberCount = club.count;
 		
-		// Find metadata for this gym in our records
-		const metadata = existingGyms.find((g) => g.name === name);
+		// Find metadata for this gym in our records using a normalized name to
+		// handle source formatting differences like OConnor vs O'Connor.
+		const metadata = gymsByNormalizedName.get(normalizeGymName(scrapedName));
 
 		if (metadata) {
 			const size = metadata.areaSize || 0;
 			const count = memberCount > 0 ? memberCount : 0;
-			const memberAreaRatio = size > 0 && count > 0 ? size / count : 0;
+			const { memberRatio, percentage } = calculateGymRatios(size, count);
 			
 			gymData.push({
-				name: name,
+				name: metadata.name,
 				address: metadata.address || "",
 				postcode: metadata.postcode || 0,
 				size: size,
 				state: metadata.state || "",
 				member_count: count,
-				member_ratio: memberAreaRatio,
-				percentage: size > 0 && count > 0 ? (1 - (memberAreaRatio > 60 ? 60 : memberAreaRatio) / 60) * 100 : 0,
+				member_ratio: memberRatio,
+				percentage: percentage,
 			});
 		} else {
 			// If it's a new gym not in our DB yet, we push basic info
 			// Note: This gym won't have address/size until the original scraper runs or manual update
 			gymData.push({
-				name: name,
+				name: scrapedName,
 				address: "Pending Update",
 				postcode: 0,
 				size: 0,
@@ -135,7 +225,7 @@ export const parseHTML = async () => {
 				percentage: 0,
 			});
 		}
-	});
+	}
 
 	const samples = gymData.slice(0, 2).map((g) => `${g.name} (${g.member_count} members)`);
 	console.log(`Successfully parsed ${gymData.length} gyms from PHP portal.`);
@@ -148,22 +238,32 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	const gymList = await db
 		.select()
 		.from(revoGyms);
+	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	for (const gym of gymData) {
+		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
+		const canonicalName = existingGym?.name ?? gym.name;
+		const canonicalPostcode = existingGym?.postcode || gym.postcode;
+		const canonicalSize = existingGym?.areaSize || gym.size;
+		const count = gym.member_count > 0 ? gym.member_count : 0;
+		const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
 		const inputInfo = {
 			id: uuidv4(),
 			created: currentTime,
-			count: gym.member_count,
-			ratio: gym.member_ratio,
-			gymName: gym.name,
-			percentage: gym.percentage,
-			gymId: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
+			count,
+			ratio: memberRatio,
+			gymName: canonicalName,
+			percentage,
+			gymId: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
 		};
 		await db.insert(revoGymCount).values(inputInfo);
 	}
 
+	const scrapedGymNames = new Set(
+		gymData.map((gym) => normalizeGymName(gym.name))
+	);
 	const missingGyms = gymList.filter((gym) => {
-		return !gymData.some((g) => g.name === gym.name);
+		return !scrapedGymNames.has(normalizeGymName(gym.name));
 	});
 
 	if (missingGyms.length > 0) {
@@ -225,17 +325,22 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 
 export const updateGymInfo = async (gymData: GymInfo[]) => {
 	const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
+	const gymList = await db.select().from(revoGyms);
+	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+
 	for (const gym of gymData) {
+		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
+		const postcode = gym.postcode || existingGym?.postcode || 0;
 		const info = {
-			id: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
-			name: gym.name,
-			address: gym.address,
-			postcode: gym.postcode,
-			state: gym.state,
-			areaSize: gym.size,
+			id: existingGym?.id ?? simpleIntegerHash((existingGym?.name ?? gym.name) + postcode.toString()).toString(),
+			name: existingGym?.name ?? gym.name,
+			address: gym.address !== "Pending Update" ? gym.address : (existingGym?.address ?? gym.address),
+			postcode,
+			state: gym.state !== "Unknown" ? gym.state : (existingGym?.state ?? gym.state),
+			areaSize: gym.size || existingGym?.areaSize || 0,
 			lastUpdated: currentTime,
 			active: 1 as number,
-			squatRacks: gym.squat_racks ?? 0,
+			squatRacks: gym.squat_racks ?? existingGym?.squatRacks ?? 0,
 		};
 
 		const updateSet: any = {
@@ -245,11 +350,8 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			state: sql`values(${revoGyms.state})`,
 			areaSize: sql`values(${revoGyms.areaSize})`,
 			lastUpdated: sql`values(${revoGyms.lastUpdated})`,
+			squatRacks: sql`values(${revoGyms.squatRacks})`,
 		};
-
-		if (gym.squat_racks !== undefined) {
-			updateSet.squatRacks = sql`values(${revoGyms.squatRacks})`;
-		}
 
 		await db
 			.insert(revoGyms)

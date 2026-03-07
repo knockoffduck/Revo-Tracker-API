@@ -36,9 +36,11 @@ mock.module("../src/utils/database", () => {
         then: (resolve: any) => {
             // Check if we are selecting from revoGyms (simplified)
             resolve([
-                { name: "Perth City", address: "123 Hay St, Perth", postcode: 6000, state: "WA", areaSize: 1500 },
-                { name: "Scarborough", address: "555 Coast Rd, Scarborough", postcode: 6019, state: "WA", areaSize: 2000 },
-                { name: "Claremont", address: "10 Bay View Tce, Claremont", postcode: 6010, state: "WA", areaSize: 1000 }
+                { name: "Perth City", address: "123 Hay St, Perth", postcode: 6000, state: "WA", areaSize: 1500, active: 1 },
+                { name: "Scarborough", address: "555 Coast Rd, Scarborough", postcode: 6019, state: "WA", areaSize: 2000, active: 1 },
+                { name: "Claremont", address: "10 Bay View Tce, Claremont", postcode: 6010, state: "WA", areaSize: 1000, active: 1 },
+                { name: "OConnor", address: "5 Stockdale Rd, O’Connor", postcode: 6163, state: "WA", areaSize: 1480, active: 1 },
+                { name: "O'Connor", address: "Pending Update", postcode: 0, state: "Unknown", areaSize: 0, active: 0 }
             ]);
         }
     };
@@ -54,9 +56,9 @@ describe("Parser tests", () => {
         
         const gymData = await parseHTML();
 
-        // We expect 3 gyms based on our mock HTML
+        // We expect 4 gyms based on our mock HTML
         expect(gymData).toBeDefined();
-        expect(gymData?.length).toBe(3);
+        expect(gymData?.length).toBe(4);
 
         const perthCity = gymData?.find(gym => gym.name === "Perth City");
         expect(perthCity).toBeDefined();
@@ -64,22 +66,28 @@ describe("Parser tests", () => {
         expect(perthCity?.postcode).toBe(6000);
         expect(perthCity?.state).toBe("WA");
         expect(perthCity?.size).toBe(1500);
-        expect(perthCity?.member_count).toBe(150);
-        // Ratio: 1500 / 150 = 10
-        expect(perthCity?.member_ratio).toBe(10); 
+        expect(perthCity?.member_count).toBe(151);
+        expect(perthCity?.member_ratio).toBeCloseTo(1500 / 151); 
 
         const scarborough = gymData?.find(gym => gym.name === "Scarborough");
-        expect(scarborough?.member_count).toBe(400);
+        expect(scarborough?.member_count).toBe(401);
         expect(scarborough?.size).toBe(2000);
-        // Ratio: 2000 / 400 = 5
-        expect(scarborough?.member_ratio).toBe(5);
+        expect(scarborough?.member_ratio).toBeCloseTo(2000 / 401);
 
         const claremont = gymData?.find(gym => gym.name === "Claremont");
         expect(claremont).toBeDefined();
         expect(claremont?.size).toBe(1000);
-        expect(claremont?.member_count).toBe(50);
-        // Ratio: 1000 / 50 = 20
-        expect(claremont?.member_ratio).toBe(20);
+        expect(claremont?.member_count).toBe(51);
+        expect(claremont?.member_ratio).toBeCloseTo(1000 / 51);
+
+        const oconnor = gymData?.find(gym => gym.name === "OConnor");
+        expect(oconnor).toBeDefined();
+        expect(oconnor?.address).toContain("Stockdale Rd");
+        expect(oconnor?.postcode).toBe(6163);
+        expect(oconnor?.size).toBe(1480);
+        expect(oconnor?.member_count).toBe(61);
+        expect(oconnor?.member_ratio).toBeCloseTo(1480 / 61);
+        expect(gymData?.find(gym => gym.name === "O'Connor")).toBeUndefined();
     });
 
     test("Handling of missing data", async () => {

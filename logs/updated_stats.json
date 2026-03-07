@@ -1,6 +1,6 @@
 [
   {
-    "timestamp": "2026-03-03 12:09:14",
+    "timestamp": "2026-03-07 10:22:21",
     "gymCount": 1,
     "missingGyms": 0,
     "totalGyms": 1,
@@ -18,7 +18,25 @@
     ]
   },
   {
-    "timestamp": "2026-03-03 12:09:14",
+    "timestamp": "2026-03-07 10:22:21",
+    "gymCount": 1,
+    "missingGyms": 0,
+    "totalGyms": 2,
+    "data": [
+      {
+        "name": "O'Connor",
+        "address": "Pending Update",
+        "postcode": 0,
+        "state": "Unknown",
+        "size": 0,
+        "member_count": 20,
+        "member_ratio": 0,
+        "percentage": 0
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-07 10:22:21",
     "gymCount": 1,
     "missingGyms": 1,
     "totalGyms": 1,
@@ -38,35 +56,7 @@
         "address": "Pending Update",
         "postcode": 6001,
         "size": 0,
-        "state": "Unknown",
-        "member_count": 0,
-        "member_ratio": 0,
-        "percentage": 0
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-02-11 10:48:35",
-    "gymCount": 1,
-    "missingGyms": 1,
-    "totalGyms": 1,
-    "data": [
-      {
-        "name": "Test Gym",
-        "address": "123 Test St",
-        "postcode": 6000,
         "state": "WA",
-        "size": 1000,
-        "member_count": 100,
-        "member_ratio": 10,
-        "percentage": 50
-      },
-      {
-        "name": "Missing Gym",
-        "address": "Pending Update",
-        "postcode": 6001,
-        "size": 0,
-        "state": "Unknown",
         "member_count": 0,
         "member_ratio": 0,
         "percentage": 0
@@ -74,7 +64,7 @@
     ]
   },
   {
-    "timestamp": "2026-02-11 10:48:35",
+    "timestamp": "2026-03-07 10:21:40",
     "gymCount": 1,
     "missingGyms": 0,
     "totalGyms": 1,
@@ -92,28 +82,18 @@
     ]
   },
   {
-    "timestamp": "2026-02-06 15:21:05",
+    "timestamp": "2026-03-07 10:21:40",
     "gymCount": 1,
-    "missingGyms": 1,
-    "totalGyms": 1,
+    "missingGyms": 0,
+    "totalGyms": 2,
     "data": [
       {
-        "name": "Test Gym",
-        "address": "123 Test St",
-        "postcode": 6000,
-        "state": "WA",
-        "size": 1000,
-        "member_count": 100,
-        "member_ratio": 10,
-        "percentage": 50
-      },
-      {
-        "name": "Missing Gym",
+        "name": "O'Connor",
         "address": "Pending Update",
-        "postcode": 6001,
-        "size": 0,
+        "postcode": 0,
         "state": "Unknown",
-        "member_count": 0,
+        "size": 0,
+        "member_count": 20,
         "member_ratio": 0,
         "percentage": 0
       }
