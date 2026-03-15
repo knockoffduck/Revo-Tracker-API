@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-03-12T15:20:48.620Z",
+  "mode": "apply",
+  "filters": {
+    "gym": null,
+    "from": "2026-03-01",
+    "to": "2026-03-12",
+    "minScore": 30,
+    "confidence": "medium"
+  },
+  "summary": {
+    "gymsScanned": 85,
+    "daysScanned": 1003,
+    "rowsInspected": 279342,
+    "suspiciousZerosFound": 7,
+    "fixesProposed": 2,
+    "fixesApplied": 0,
+    "rowsSkipped": 67618
+  },
+  "proposals": [
+    {
+      "rowId": "b1e3d3d7-9b33-4a7f-9aec-8071b465cb7f",
+      "gymId": "6877181",
+      "gymName": "Shellharbour",
+      "utcTimestamp": "2026-03-05 21:29:18",
+      "localTimestamp": "2026-03-06 08:29",
+      "localDate": "2026-03-06",
+      "originalCount": 0,
+      "repairedCount": 9,
+      "originalRatio": 0,
+      "repairedRatio": 111.11111111111111,
+      "originalPercentage": 0,
+      "repairedPercentage": 0,
+      "repairMethod": "interpolation",
+      "trendAverage": 23,
+      "trendSampleCount": 36,
+      "previousCount": 8,
+      "nextCount": 10,
+      "confidence": "medium",
+      "anomalyScore": 32,
+      "zeroRunLength": 1,
+      "reason": "Zero occupancy conflicts with expected trend 23; previous=8; next=10; score=32.0; run=1"
+    },
+    {
+      "rowId": "dd0fb880-ba99-4e5c-86e1-f9a8c8e4c7c0",
+      "gymId": "9243085",
+      "gymName": "Charlestown",
+      "utcTimestamp": "2026-03-07 05:59:18",
+      "localTimestamp": "2026-03-07 16:59",
+      "localDate": "2026-03-07",
+      "originalCount": 0,
+      "repairedCount": 11,
+      "originalRatio": 0,
+      "repairedRatio": 110.45454545454545,
+      "originalPercentage": 0,
+      "repairedPercentage": 0,
+      "repairMethod": "interpolation",
+      "trendAverage": 20,
+      "trendSampleCount": 30,
+      "previousCount": 8,
+      "nextCount": 14,
+      "confidence": "medium",
+      "anomalyScore": 31,
+      "zeroRunLength": 1,
+      "reason": "Zero occupancy conflicts with expected trend 20; previous=8; next=14; score=31.0; run=1"
+    }
+  ]
+}

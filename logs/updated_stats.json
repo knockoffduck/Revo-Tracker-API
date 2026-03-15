@@ -1,24 +1,6 @@
 [
   {
-    "timestamp": "2026-03-07 10:22:21",
-    "gymCount": 1,
-    "missingGyms": 0,
-    "totalGyms": 1,
-    "data": [
-      {
-        "name": "Mock Gym",
-        "address": "123 Mock St",
-        "postcode": 1234,
-        "size": 500,
-        "state": "WA",
-        "member_count": 50,
-        "member_ratio": 10,
-        "percentage": 83.33333333333334
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-03-07 10:22:21",
+    "timestamp": "2026-03-15 15:42:05",
     "gymCount": 1,
     "missingGyms": 0,
     "totalGyms": 2,
@@ -36,7 +18,7 @@
     ]
   },
   {
-    "timestamp": "2026-03-07 10:22:21",
+    "timestamp": "2026-03-15 15:42:05",
     "gymCount": 1,
     "missingGyms": 1,
     "totalGyms": 1,
@@ -64,25 +46,53 @@
     ]
   },
   {
-    "timestamp": "2026-03-07 10:21:40",
+    "timestamp": "2026-03-15 15:41:54",
     "gymCount": 1,
     "missingGyms": 0,
-    "totalGyms": 1,
+    "totalGyms": 2,
     "data": [
       {
-        "name": "Mock Gym",
-        "address": "123 Mock St",
-        "postcode": 1234,
-        "size": 500,
-        "state": "WA",
-        "member_count": 50,
-        "member_ratio": 10,
-        "percentage": 83.33333333333334
+        "name": "O'Connor",
+        "address": "Pending Update",
+        "postcode": 0,
+        "state": "Unknown",
+        "size": 0,
+        "member_count": 20,
+        "member_ratio": 0,
+        "percentage": 0
       }
     ]
   },
   {
-    "timestamp": "2026-03-07 10:21:40",
+    "timestamp": "2026-03-15 15:41:54",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "totalGyms": 1,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      },
+      {
+        "name": "Missing Gym",
+        "address": "Pending Update",
+        "postcode": 6001,
+        "size": 0,
+        "state": "WA",
+        "member_count": 0,
+        "member_ratio": 0,
+        "percentage": 0
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-03-12 13:51:23",
     "gymCount": 1,
     "missingGyms": 0,
     "totalGyms": 2,

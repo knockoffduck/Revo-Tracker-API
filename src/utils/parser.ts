@@ -136,7 +136,8 @@ const calculateGymRatios = (size: number, count: number) => {
 	}
 
 	const memberRatio = size / count;
-	const percentage = (1 - (memberRatio > 60 ? 60 : memberRatio) / 60) * 100;
+	const estimatedCapacity = size / 6;
+	const percentage = Math.min((count / estimatedCapacity) * 100, 100);
 	return { memberRatio, percentage };
 };
 
