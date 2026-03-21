@@ -142,4 +142,6 @@ async function run() {
     }
 }
 
-run();
+if (import.meta.main) {
+    run();
+}
