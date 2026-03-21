@@ -77,7 +77,7 @@ export const axiosGetWithProxyFallback = async <T = unknown>(
 	const directConfig = buildDirectRequestConfig(config);
 
 	if (!httpsAgent) {
-		console.log(`[${context}] Using direct connection.`);
+		console.log(`[${context}] Using direct connection`);
 		return axios.get<T>(url, directConfig);
 	}
 
@@ -88,16 +88,12 @@ export const axiosGetWithProxyFallback = async <T = unknown>(
 			proxy: false,
 		});
 	} catch (proxyError) {
-		console.warn(
-			`[${context}] Proxy request failed via ${proxyLabel}; falling back to direct connection: ${getErrorMessage(proxyError)}`
-		);
+		console.warn(`[${context}] Proxy ${proxyLabel} failed — falling back to direct: ${getErrorMessage(proxyError)}`);
 
 		try {
 			return await axios.get<T>(url, directConfig);
 		} catch (directError) {
-			console.error(
-				`[${context}] Direct fallback failed: ${getErrorMessage(directError)}`
-			);
+			console.error(`[${context}] Direct fallback also failed: ${getErrorMessage(directError)}`);
 			throw directError;
 		}
 	}

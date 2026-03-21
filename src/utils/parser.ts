@@ -9,29 +9,71 @@ import { v4 as uuidv4 } from "uuid";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
 
+// ---- Logging helpers ----
+
+const STAGE = {
+	COOKIES: "\x1b[36m[COOKIES]\x1b[0m",
+	FETCH: "\x1b[35m[FETCH]\x1b[0m",
+	PARSE: "\x1b[34m[PARSE]\x1b[0m",
+	DB: "\x1b[33m[DB]\x1b[0m",
+	OK: "\x1b[32m✔\x1b[0m",
+	WARN: "\x1b[33m⚠\x1b[0m",
+	FAIL: "\x1b[31m✖\x1b[0m",
+	INFO: "\x1b[90mℹ\x1b[0m",
+};
+
+type CookieAttempt = {
+	index: number;
+	label: string;
+	duration_ms: number;
+	gymsFound: number;
+	proxy: string;
+	status: "network_error" | "zero_gyms" | "valid";
+	error?: string;
+};
+
+type ScrapeSession = {
+	startedAt: string;
+	cookiesAvailable: number;
+	cookieAttempts: CookieAttempt[];
+	workingCookieIndex?: number;
+	totalGymsFound: number;
+	missingGyms: number;
+	totalKnownGyms: number;
+	dbInserts: number;
+	dbUpdates: number;
+	duration_ms: number;
+};
+
+let currentSession: ScrapeSession | null = null;
+
+const nowIso = () => new Date().toISOString();
+
 const cookieToReadable = (cookie: string): string => {
 	try {
-		// Cookie format: "Member=<serialized>"
 		const serialized = cookie.includes("=") ? cookie.split("=")[1] : cookie;
 		const decoded = decodeURIComponent(serialized);
 		const serializer = new PHPSerializer();
 		const obj = serializer.unserialize(decoded);
-		// Return just the key identity fields for logging
-		return `${obj.firstName} ${obj.lastName} (${obj.email})`;
+		return `${obj.firstName} ${obj.lastName} <${obj.email}>`;
 	} catch {
-		// Fallback to raw truncated string if deserialization fails
 		return cookie.length > 60 ? cookie.substring(0, 60) + "..." : cookie;
 	}
 };
 
+// ---- Cookie management ----
+
 const refreshCookies = async () => {
+	console.log(`${STAGE.COOKIES} Refreshing cookies...`);
 	try {
-		console.log("[Parser] Refreshing cookies...");
 		const proc = Bun.spawn(["bun", "run", "Scraper/generate_cookies.ts"]);
 		await proc.exited;
-		console.log("[Parser] Cookies refreshed successfully.");
+		if (proc.exitCode !== 0) {
+			throw new Error(`generate_cookies.ts exited with code ${proc.exitCode}`);
+		}
+		console.log(`${STAGE.COOKIES} ${STAGE.OK} Refreshed successfully`);
 	} catch (e) {
-		console.error("[Parser] Failed to refresh cookies:", e);
+		console.error(`${STAGE.COOKIES} ${STAGE.FAIL} Refresh failed:`, e);
 	}
 };
 
@@ -49,23 +91,16 @@ const checkAndRefreshCookies = async () => {
 	}
 };
 
-const getRotatedCookie = async () => {
-	try {
-		await checkAndRefreshCookies();
-		const cookiesContent = await file("Scraper/cookies.json").text();
-		const cookies = JSON.parse(cookiesContent);
-		const randomIndex = Math.floor(Math.random() * cookies.length);
-		return cookies[randomIndex];
-	} catch (e) {
-		console.error("Error reading cookies.json:", e);
-		return "";
-	}
-};
+// ---- Fetch helpers ----
 
-const fetchPHPDataWithCookie = async (cookie: string, retries = 3): Promise<cheerio.CheerioAPI | null> => {
+const fetchPHPDataWithCookie = async (
+	cookie: string,
+	cookieIndex: number,
+	retries = 2
+): Promise<{ $: cheerio.CheerioAPI; duration_ms: number } | { error: string; duration_ms: number }> => {
 	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
-
 	const startTime = Date.now();
+
 	try {
 		const response = await axiosGetWithProxyFallback<string>("Parser", url, {
 			headers: {
@@ -77,59 +112,118 @@ const fetchPHPDataWithCookie = async (cookie: string, retries = 3): Promise<chee
 			},
 			timeout: 15000,
 		});
-		const duration = Date.now() - startTime;
-		console.log(`[Parser] Fetched data successfully (${duration}ms)`);
-		return cheerio.load(response.data);
+		const duration_ms = Date.now() - startTime;
+		return { $: cheerio.load(response.data), duration_ms };
 	} catch (e: any) {
-		if (retries > 0) {
-			console.log(`[Parser] Fetch failed, retrying with same cookie... (${retries} left)`);
-			return fetchPHPDataWithCookie(cookie, retries - 1);
-		}
-		console.error("[Parser] Error fetching PHP data after all retries:", e.message);
-		return null;
+		const duration_ms = Date.now() - startTime;
+		return { error: e.message, duration_ms };
 	}
 };
 
-const fetchPHPData = async (): Promise<{ $: cheerio.CheerioAPI; clubCounts: { name: string; count: number }[] } | null> => {
+// ---- Main scrape logic ----
+
+const fetchPHPData = async (): Promise<{
+	$: cheerio.CheerioAPI;
+	clubCounts: { name: string; count: number }[];
+	session: ScrapeSession;
+} | null> => {
+	const sessionStart = Date.now();
 	await checkAndRefreshCookies();
 	const cookiesContent = await file("Scraper/cookies.json").text();
 	const cookies = JSON.parse(cookiesContent);
 
 	if (cookies.length === 0) {
-		console.error("[Parser] No cookies available in cookies.json");
+		console.error(`${STAGE.FETCH} ${STAGE.FAIL} No cookies found in cookies.json`);
 		return null;
 	}
 
+	currentSession = {
+		startedAt: nowIso(),
+		cookiesAvailable: cookies.length,
+		cookieAttempts: [],
+		totalGymsFound: 0,
+		missingGyms: 0,
+		totalKnownGyms: 0,
+		dbInserts: 0,
+		dbUpdates: 0,
+		duration_ms: 0,
+	};
+
+	console.log(`${STAGE.FETCH} Starting scrape session — ${cookies.length} cookies available`);
+	console.log(`${STAGE.FETCH} ─── Cookie Attempt Log ───────────────────────────`);
+
 	for (let i = 0; i < cookies.length; i++) {
 		const cookie = cookies[i];
-		// Truncate cookie for log readability — it's a long encoded string
 		const cookieLabel = cookieToReadable(cookie);
-		console.log(`[Parser] Trying cookie #${i + 1}/${cookies.length}: ${cookieLabel}`);
+		const proxyLabel = process.env.DOMAIN_NAME ?? "direct";
 
-		const $ = await fetchPHPDataWithCookie(cookie);
-		if ($ === null) {
-			console.warn(`[Parser] Cookie #${i + 1} failed to fetch (network error), trying next...`);
+		process.stdout.write(`${STAGE.FETCH} [${i + 1}/${cookies.length}] ${cookieLabel} ... `);
+
+		const result = await fetchPHPDataWithCookie(cookie, i);
+		const attempt: CookieAttempt = {
+			index: i,
+			label: cookieLabel,
+			proxy: proxyLabel,
+			duration_ms: result.duration_ms,
+			gymsFound: 0,
+			status: "network_error",
+		};
+
+		if ("error" in result) {
+			process.stdout.write(`${STAGE.FAIL} network error (${result.duration_ms}ms)\n`);
+			process.stdout.write(`       └─ ${result.error}\n`);
+			attempt.error = result.error;
+			if (currentSession) currentSession.cookieAttempts.push(attempt);
 			continue;
 		}
 
-		const clubCounts = extractClubCounts($);
+		const clubCounts = extractClubCounts(result.$);
+		attempt.duration_ms = result.duration_ms;
+
 		if (clubCounts.length === 0) {
-			console.warn(`[Parser] Cookie #${i + 1} returned 0 gyms — marking as invalid, trying next...`);
+			process.stdout.write(`${STAGE.WARN} 0 gyms returned (${result.duration_ms}ms)\n`);
+			process.stdout.write(`       └─ cookie invalid or blocked\n`);
+			attempt.status = "zero_gyms";
+			attempt.gymsFound = 0;
+			if (currentSession) currentSession.cookieAttempts.push(attempt);
 			continue;
 		}
 
-		console.log(`[Parser] Cookie #${i + 1} valid — ${clubCounts.length} gyms found`);
-		return { $, clubCounts };
+		process.stdout.write(`${STAGE.OK} ${clubCounts.length} gyms (${result.duration_ms}ms)\n`);
+		attempt.status = "valid";
+		attempt.gymsFound = clubCounts.length;
+
+		if (currentSession) {
+			currentSession.cookieAttempts.push(attempt);
+			currentSession.workingCookieIndex = i;
+			currentSession.totalGymsFound = clubCounts.length;
+		}
+
+		console.log(`${STAGE.FETCH} ──────────────────────────────────────────────────`);
+		return { $: result.$, clubCounts, session: currentSession! };
 	}
 
-	console.error("[Parser] All cookies failed — no valid cookie returned any gyms");
+	console.log(`${STAGE.FETCH} ──────────────────────────────────────────────────`);
+	console.error(`${STAGE.FETCH} ${STAGE.FAIL} All ${cookies.length} cookies exhausted — no valid response`);
+
+	// Print summary of all attempts
+	console.log(`${STAGE.FETCH} Attempt summary:`);
+	if (currentSession) {
+		for (const a of currentSession.cookieAttempts) {
+			const icon = a.status === "valid" ? STAGE.OK : a.status === "zero_gyms" ? STAGE.WARN : STAGE.FAIL;
+			console.log(`       ${icon} [#${a.index + 1}] ${a.label} | ${a.duration_ms}ms | gyms=${a.gymsFound} | ${a.error ?? ""}`);
+		}
+	}
+
 	return null;
 };
+
+// ---- Parsing helpers ----
 
 const normalizeGymName = (name: string) => {
 	return name
 		.normalize("NFKD")
-		.replace(/[’']/g, "")
+		.replace(/['']/g, "")
 		.replace(/\s+/g, " ")
 		.trim()
 		.toLowerCase();
@@ -142,12 +236,10 @@ const getGymMetadataScore = (gym: {
 	address?: string | null;
 }) => {
 	let score = 0;
-
 	if ((gym.active ?? 0) > 0) score += 100;
 	if ((gym.postcode ?? 0) > 0) score += 10;
 	if ((gym.areaSize ?? 0) > 0) score += 10;
 	if (gym.address && gym.address !== "Pending Update") score += 10;
-
 	return score;
 };
 
@@ -164,27 +256,18 @@ const buildGymsByNormalizedName = (
 	}>
 ) => {
 	const gymsByNormalizedName = new Map<string, (typeof gyms)[number]>();
-
 	for (const gym of gyms) {
 		const normalizedName = normalizeGymName(gym.name);
 		const existingGym = gymsByNormalizedName.get(normalizedName);
-
-		if (
-			!existingGym ||
-			getGymMetadataScore(gym) > getGymMetadataScore(existingGym)
-		) {
+		if (!existingGym || getGymMetadataScore(gym) > getGymMetadataScore(existingGym)) {
 			gymsByNormalizedName.set(normalizedName, gym);
 		}
 	}
-
 	return gymsByNormalizedName;
 };
 
 const calculateGymRatios = (size: number, count: number) => {
-	if (size <= 0 || count <= 0) {
-		return { memberRatio: 0, percentage: 0 };
-	}
-
+	if (size <= 0 || count <= 0) return { memberRatio: 0, percentage: 0 };
 	const memberRatio = size / count;
 	const estimatedCapacity = size / 6;
 	const percentage = Math.min((count / estimatedCapacity) * 100, 100);
@@ -192,28 +275,24 @@ const calculateGymRatios = (size: number, count: number) => {
 };
 
 const extractClubCounts = ($: cheerio.CheerioAPI) => {
-	const scripts = $("script")
-		.map((_, el) => $(el).html() || "")
-		.get();
+	const scripts = $("script").map((_, el) => $(el).html() || "").get();
 
 	for (const script of scripts) {
 		const match = script.match(/var\s+clubCounterLists\s*=\s*(\{[\s\S]*?\})\s*;/);
 		if (!match) continue;
-
 		try {
 			const clubCounterLists = JSON.parse(match[1]) as Record<
 				string,
 				{ name?: string; shortname?: string; in_club?: string | number }
 			>;
-
 			return Object.values(clubCounterLists)
 				.map((club) => ({
 					name: String(club.name ?? club.shortname ?? "").replace(/\s+/g, " ").trim(),
 					count: Number(club.in_club),
 				}))
 				.filter((club) => club.name && Number.isFinite(club.count));
-		} catch (error) {
-			console.warn("[Parser] Failed to parse clubCounterLists JSON, falling back to DOM parsing.", error);
+		} catch {
+			console.warn(`${STAGE.PARSE} ${STAGE.WARN} clubCounterLists JSON parse failed, falling back to DOM`);
 		}
 	}
 
@@ -226,15 +305,21 @@ const extractClubCounts = ($: cheerio.CheerioAPI) => {
 		.filter((club) => club.name && Number.isFinite(club.count));
 };
 
-export const parseHTML = async () => {
-	const result = await fetchPHPData();
+// ---- Public API ----
 
+export const parseHTML = async (): Promise<GymInfo[]> => {
+	const parseStart = Date.now();
+	console.log(`\n${STAGE.PARSE} ═══════════════════════════════════════════════════`);
+	console.log(`${STAGE.PARSE} PHASE 1: Fetch & Parse`);
+
+	const result = await fetchPHPData();
 	if (result == null) {
-		console.log("Failed to fetch PHP data — all cookies exhausted");
+		console.error(`${STAGE.PARSE} ${STAGE.FAIL} Scrape failed — all cookies exhausted\n`);
 		return [];
 	}
 
 	const { $, clubCounts } = result;
+	const parseDuration = Date.now() - parseStart;
 
 	const existingGyms = await db.select().from(revoGyms);
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
@@ -243,16 +328,12 @@ export const parseHTML = async () => {
 	for (const club of clubCounts) {
 		const scrapedName = club.name;
 		const memberCount = club.count;
-		
-		// Find metadata for this gym in our records using a normalized name to
-		// handle source formatting differences like OConnor vs O'Connor.
 		const metadata = gymsByNormalizedName.get(normalizeGymName(scrapedName));
 
 		if (metadata) {
 			const size = metadata.areaSize || 0;
 			const count = memberCount > 0 ? memberCount : 0;
 			const { memberRatio, percentage } = calculateGymRatios(size, count);
-			
 			gymData.push({
 				name: metadata.name,
 				address: metadata.address || "",
@@ -264,8 +345,6 @@ export const parseHTML = async () => {
 				percentage: percentage,
 			});
 		} else {
-			// If it's a new gym not in our DB yet, we push basic info
-			// Note: This gym won't have address/size until the original scraper runs or manual update
 			gymData.push({
 				name: scrapedName,
 				address: "Pending Update",
@@ -279,19 +358,25 @@ export const parseHTML = async () => {
 		}
 	}
 
-	const samples = gymData.slice(0, 2).map((g) => `${g.name} (${g.member_count} members)`);
-	console.log(`Successfully parsed ${gymData.length} gyms from PHP portal.`);
-	console.log(`Data Samples: [${samples.join(", ")}${gymData.length > 2 ? ", ..." : ""}]`);
+	// Log sample gyms
+	const sampleGyms = gymData.slice(0, 3).map((g) => `${g.name} (${g.member_count})`).join(", ");
+	console.log(`${STAGE.PARSE} Parsed ${gymData.length} gyms in ${parseDuration}ms`);
+	console.log(`${STAGE.PARSE} Samples: [${sampleGyms}${gymData.length > 3 ? ", ..." : ""}]`);
+	console.log(`${STAGE.PARSE} ═══════════════════════════════════════════════════\n`);
+
 	return gymData;
 };
 
 export const insertGymStats = async (gymData: GymInfo[]) => {
-	const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
-	const gymList = await db
-		.select()
-		.from(revoGyms);
+	const dbStart = Date.now();
+	console.log(`${STAGE.DB} ═══════════════════════════════════════════════════`);
+	console.log(`${STAGE.DB} PHASE 2: Database Write`);
+
+	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
+	const gymList = await db.select().from(revoGyms);
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
+	let inserts = 0;
 	for (const gym of gymData) {
 		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
 		const canonicalName = existingGym?.name ?? gym.name;
@@ -299,29 +384,28 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const canonicalSize = existingGym?.areaSize || gym.size;
 		const count = gym.member_count > 0 ? gym.member_count : 0;
 		const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
-		const inputInfo = {
+		await db.insert(revoGymCount).values({
 			id: uuidv4(),
 			created: currentTime,
 			count,
 			ratio: memberRatio,
 			gymName: canonicalName,
 			percentage,
-			gymId: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
-		};
-		await db.insert(revoGymCount).values(inputInfo);
+			gymId:
+				existingGym?.id ??
+				simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
+		});
+		inserts++;
 	}
 
-	const scrapedGymNames = new Set(
-		gymData.map((gym) => normalizeGymName(gym.name))
-	);
-	const missingGyms = gymList.filter((gym) => {
-		return !scrapedGymNames.has(normalizeGymName(gym.name));
-	});
+	const scrapedGymNames = new Set(gymData.map((g) => normalizeGymName(g.name)));
+	const missingGyms = gymList.filter((g) => !scrapedGymNames.has(normalizeGymName(g.name)));
 
 	if (missingGyms.length > 0) {
-		console.log("Missing gyms in current scrape:", missingGyms.map(g => g.name));
+		console.log(`${STAGE.DB} ${STAGE.WARN} ${missingGyms.length} known gyms missing from scrape:`);
 		for (const gym of missingGyms) {
-			const inputInfo = {
+			console.log(`${STAGE.DB}       - ${gym.name} (${gym.postcode})`);
+			await db.insert(revoGymCount).values({
 				id: uuidv4(),
 				created: currentTime,
 				count: 0,
@@ -329,57 +413,56 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 				gymName: gym.name,
 				percentage: 0,
 				gymId: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
-			};
-			await db.insert(revoGymCount).values(inputInfo);
+			});
+			inserts++;
 		}
 	}
 
-	// Logging last 5 sessions
+	// Persist session log
+	const logPath = "logs/updated_stats.json";
+	let logs: any[] = [];
 	try {
-		const logPath = "logs/updated_stats.json";
-		let logs: any[] = [];
-		try {
-			const logContent = await file(logPath).text();
-			logs = JSON.parse(logContent);
-		} catch (e) {
-			// File doesn't exist yet or is invalid
-		}
+		const logContent = await file(logPath).text();
+		logs = JSON.parse(logContent);
+	} catch {}
 
-		const fullData = [
-			...gymData,
-			...missingGyms.map(gym => ({
-				name: gym.name,
-				address: gym.address || "Pending Update",
-				postcode: gym.postcode || 0,
-				size: gym.areaSize || 0,
-				state: gym.state || "Unknown",
-				member_count: 0,
-				member_ratio: 0,
-				percentage: 0,
-			}))
-		];
+	const fullData = [
+		...gymData,
+		...missingGyms.map((g) => ({
+			name: g.name,
+			address: g.address || "Pending Update",
+			postcode: g.postcode || 0,
+			size: g.areaSize || 0,
+			state: g.state || "Unknown",
+			member_count: 0,
+			member_ratio: 0,
+			percentage: 0,
+		})),
+	];
 
-		const newEntry = {
-			timestamp: currentTime,
-			gymCount: gymData.length,
-			missingGyms: missingGyms.length,
-			totalGyms: gymList.length,
-			data: fullData, // Log the full list of gyms (including missing ones)
-		};
+	const sessionEntry = {
+		timestamp: currentTime,
+		gymCount: gymData.length,
+		missingGyms: missingGyms.length,
+		totalKnownGyms: gymList.length,
+		data: fullData,
+	};
 
-		logs.unshift(newEntry);
-		const limitedLogs = logs.slice(0, 5);
-		await Bun.write(logPath, JSON.stringify(limitedLogs, null, 2));
-	} catch (e) {
-		console.error("Failed to update session logs:", e);
-	}
+	logs.unshift(sessionEntry);
+	await Bun.write(logPath, JSON.stringify(logs.slice(0, 5), null, 2));
+
+	const dbDuration = Date.now() - dbStart;
+	console.log(`${STAGE.DB} ${STAGE.OK} ${inserts} rows inserted (${dbDuration}ms)`);
+	console.log(`${STAGE.DB}       gyms=${gymData.length} | missing=${missingGyms.length} | total=${gymList.length}`);
+	console.log(`${STAGE.DB} ═══════════════════════════════════════════════════\n`);
 };
 
 export const updateGymInfo = async (gymData: GymInfo[]) => {
-	const currentTime = new Date().toISOString().slice(0, 19).replace('T', ' ');
+	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
 	const gymList = await db.select().from(revoGyms);
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
+	let updates = 0;
 	for (const gym of gymData) {
 		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
 		const postcode = gym.postcode || existingGym?.postcode || 0;
@@ -394,7 +477,6 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			active: 1 as number,
 			squatRacks: gym.squat_racks ?? existingGym?.squatRacks ?? 0,
 		};
-
 		const updateSet: any = {
 			name: sql`values(${revoGyms.name})`,
 			address: sql`values(${revoGyms.address})`,
@@ -404,12 +486,9 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			lastUpdated: sql`values(${revoGyms.lastUpdated})`,
 			squatRacks: sql`values(${revoGyms.squatRacks})`,
 		};
-
-		await db
-			.insert(revoGyms)
-			.values(info)
-			.onDuplicateKeyUpdate({
-				set: updateSet,
-			});
+		await db.insert(revoGyms).values(info).onDuplicateKeyUpdate({ set: updateSet });
+		updates++;
 	}
+
+	console.log(`${STAGE.DB} ${STAGE.OK} Gym metadata updated: ${updates} rows`);
 };
