@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
+import { sendAlert } from "./alerts";
 
 // ---- Logging helpers ----
 
@@ -46,6 +47,8 @@ type ScrapeSession = {
 };
 
 let currentSession: ScrapeSession | null = null;
+let lastAllCookiesFailedAlert = 0;
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // minimum 1h between same alerts
 
 const nowIso = () => new Date().toISOString();
 
@@ -59,6 +62,28 @@ const cookieToReadable = (cookie: string): string => {
 	} catch {
 		return cookie.length > 60 ? cookie.substring(0, 60) + "..." : cookie;
 	}
+};
+
+const alertAllCookiesFailed = (cookies: string[]) => {
+	const now = Date.now();
+	if (now - lastAllCookiesFailedAlert < ALERT_COOLDOWN_MS) {
+		console.log(`${STAGE.FETCH} Alert suppressed (cooldown active — last alert < 1h ago)`);
+		return;
+	}
+	lastAllCookiesFailedAlert = now;
+
+	const body = [
+		`All <b>${cookies.length}</b> cookies exhausted — zero gyms scraped.`,
+		``,
+		`Likely causes:`,
+		`• All cookies expired or banned`,
+		`• Proxy IP blocked by Revo`,
+		`• Portal structure changed`,
+		``,
+		`Run <code>bun run Scraper/generate_cookies.ts</code> to regenerate cookies.`,
+	].join("\n");
+
+	sendAlert("error", "All Cookies Failed — Zero Gyms", body);
 };
 
 // ---- Cookie management ----
@@ -205,6 +230,7 @@ const fetchPHPData = async (): Promise<{
 
 	console.log(`${STAGE.FETCH} ──────────────────────────────────────────────────`);
 	console.error(`${STAGE.FETCH} ${STAGE.FAIL} All ${cookies.length} cookies exhausted — no valid response`);
+	alertAllCookiesFailed(cookies);
 
 	// Print summary of all attempts
 	console.log(`${STAGE.FETCH} Attempt summary:`);
