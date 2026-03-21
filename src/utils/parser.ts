@@ -38,7 +38,6 @@ const getRotatedCookie = async () => {
 		await checkAndRefreshCookies();
 		const cookiesContent = await file("Scraper/cookies.json").text();
 		const cookies = JSON.parse(cookiesContent);
-		console.log(`[Parser] cookies.json content:`, cookies);
 		const randomIndex = Math.floor(Math.random() * cookies.length);
 		return cookies[randomIndex];
 	} catch (e) {
@@ -47,9 +46,8 @@ const getRotatedCookie = async () => {
 	}
 };
 
-const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => {
+const fetchPHPDataWithCookie = async (cookie: string, retries = 3): Promise<cheerio.CheerioAPI | null> => {
 	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
-	const cookie = await getRotatedCookie();
 
 	const startTime = Date.now();
 	try {
@@ -61,19 +59,55 @@ const fetchPHPData = async (retries = 5): Promise<cheerio.CheerioAPI | null> => 
 				"user-agent":
 					"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.2 Safari/605.1.15",
 			},
-			timeout: 10000,
+			timeout: 15000,
 		});
 		const duration = Date.now() - startTime;
 		console.log(`[Parser] Fetched data successfully (${duration}ms)`);
 		return cheerio.load(response.data);
 	} catch (e: any) {
 		if (retries > 0) {
-			console.log(`[Parser] Fetch failed, retrying... (${retries} left)`);
-			return fetchPHPData(retries - 1);
+			console.log(`[Parser] Fetch failed, retrying with same cookie... (${retries} left)`);
+			return fetchPHPDataWithCookie(cookie, retries - 1);
 		}
 		console.error("[Parser] Error fetching PHP data after all retries:", e.message);
 		return null;
 	}
+};
+
+const fetchPHPData = async (): Promise<{ $: cheerio.CheerioAPI; clubCounts: { name: string; count: number }[] } | null> => {
+	await checkAndRefreshCookies();
+	const cookiesContent = await file("Scraper/cookies.json").text();
+	const cookies = JSON.parse(cookiesContent);
+
+	if (cookies.length === 0) {
+		console.error("[Parser] No cookies available in cookies.json");
+		return null;
+	}
+
+	for (let i = 0; i < cookies.length; i++) {
+		const cookie = cookies[i];
+		// Truncate cookie for log readability — it's a long encoded string
+		const cookieLabel = cookie.length > 60 ? cookie.substring(0, 60) + "..." : cookie;
+		console.log(`[Parser] Trying cookie #${i + 1}/${cookies.length}: ${cookieLabel}`);
+
+		const $ = await fetchPHPDataWithCookie(cookie);
+		if ($ === null) {
+			console.warn(`[Parser] Cookie #${i + 1} failed to fetch (network error), trying next...`);
+			continue;
+		}
+
+		const clubCounts = extractClubCounts($);
+		if (clubCounts.length === 0) {
+			console.warn(`[Parser] Cookie #${i + 1} returned 0 gyms — marking as invalid, trying next...`);
+			continue;
+		}
+
+		console.log(`[Parser] Cookie #${i + 1} valid — ${clubCounts.length} gyms found`);
+		return { $, clubCounts };
+	}
+
+	console.error("[Parser] All cookies failed — no valid cookie returned any gyms");
+	return null;
 };
 
 const normalizeGymName = (name: string) => {
@@ -177,17 +211,18 @@ const extractClubCounts = ($: cheerio.CheerioAPI) => {
 };
 
 export const parseHTML = async () => {
-	const $ = await fetchPHPData();
+	const result = await fetchPHPData();
 
-	if ($ == null) {
-		console.log("Failed to fetch PHP data");
+	if (result == null) {
+		console.log("Failed to fetch PHP data — all cookies exhausted");
 		return [];
 	}
+
+	const { $, clubCounts } = result;
 
 	const existingGyms = await db.select().from(revoGyms);
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
-	const clubCounts = extractClubCounts($);
 
 	for (const club of clubCounts) {
 		const scrapedName = club.name;
