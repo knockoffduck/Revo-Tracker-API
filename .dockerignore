@@ -4,6 +4,6 @@ node_modules
 *.log
 reports/
 tests/
-Scraper/
+
 drizzle/
 scripts/

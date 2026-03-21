@@ -21,7 +21,9 @@ COPY . .
 
 # Non-root user for security
 RUN addgroup -g 1001 -S appgroup && \
-    adduser  -u 1001 -S appuser -G appgroup
+    adduser  -u 1001 -S appuser -G appgroup && \
+    mkdir -p /app/logs && \
+    chown -R appuser:appgroup /app/logs
 USER appuser
 
 EXPOSE 3001
