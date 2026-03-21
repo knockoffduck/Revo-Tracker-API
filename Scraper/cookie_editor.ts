@@ -1,4 +1,5 @@
-import { createInterface } from "readline";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
 
 // --- PHP Serialization/Deserialization Logic ---
 
@@ -71,7 +72,7 @@ class PHPSerializer {
         const lengthEnd = this.data.indexOf(':', this.offset);
         const length = parseInt(this.data.substring(this.offset, lengthEnd));
         this.offset = lengthEnd + 2; // skip : {
-        
+
         const arr: any = {};
         for (let i = 0; i < length; i++) {
             const key = this.parse();
@@ -112,7 +113,7 @@ class PHPSerializer {
             return `d:${value};`;
         }
         if (typeof value === 'string') return `s:${value.length}:"${value}";`;
-        
+
         if (typeof value === 'object') {
             if (value.__PHP_CLASS_NAME__) {
                 const className = value.__PHP_CLASS_NAME__;
@@ -135,152 +136,179 @@ class PHPSerializer {
     }
 }
 
-// --- Randomization Logic ---
+// --- Diffing Logic ---
 
-function randomString(length: number): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < length; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+function flattenObject(obj: any, prefix = ""): Record<string, any> {
+    const result: Record<string, any> = {};
+    for (const [key, val] of Object.entries(obj)) {
+        const fullKey = prefix ? `${prefix}.${key}` : key;
+        if (typeof val === 'object' && val !== null && !Array.isArray(val) && !key.startsWith('__PHP')) {
+            Object.assign(result, flattenObject(val, fullKey));
+        } else {
+            result[fullKey] = val;
+        }
     }
     return result;
 }
 
-function randomInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+function diffObjects(a: any, b: any): Record<string, { a: any; b: any }> {
+    const flatA = flattenObject(a);
+    const flatB = flattenObject(b);
+    const allKeys = new Set([...Object.keys(flatA), ...Object.keys(flatB)]);
+    const diffs: Record<string, { a: any; b: any }> = {};
+    for (const key of allKeys) {
+        if (flatA[key] !== flatB[key]) {
+            diffs[key] = { a: flatA[key], b: flatB[key] };
+        }
+    }
+    return diffs;
 }
 
-function randomizeValue(key: string, value: any): any {
-    if (value === null) return null;
-    const keyLower = key.toLowerCase();
-    
-    if (typeof value === 'boolean') {
-        if (keyLower === 'isactive') return Math.random() > 0.1;
-        return Math.random() < 0.5;
+function summarizeDiffs(diffs: Record<string, { a: any; b: any }>, labelA = "Cookie 0", labelB = "Other"): string {
+    const lines: string[] = [];
+    for (const [key, { a, b }] of Object.entries(diffs)) {
+        lines.push(`  ${key}:`);
+        lines.push(`    ${labelA}: ${JSON.stringify(a)}`);
+        lines.push(`    ${labelB}: ${JSON.stringify(b)}`);
     }
-    
-    if (typeof value === 'number') {
-        if (keyLower.includes('id')) {
-             if (keyLower.includes('homeclub')) {
-                 const clubs = [1, 10, 14, 30, 41, 43, 59, 82];
-                 return clubs[randomInt(0, clubs.length - 1)];
-             }
-             if (keyLower.includes('consultant')) return randomInt(1, 10);
-             if (keyLower.includes('version')) return 1662817461 + randomInt(0, 50000000);
-             return randomInt(111111, 999111);
-        }
-        return randomInt(0, 100);
-    }
-    
-    if (typeof value === 'string') {
-        if (keyLower.includes('name')) {
-            if (value === "") return "";
-            const firstNames = ["Daffa", "John", "Jane", "Alex", "Sarah", "Michael", "Emily"];
-            const lastNames = ["Fathurohman", "Doe", "Smith", "Johnson", "Brown", "Miller"];
-            if (keyLower.includes('first')) return firstNames[randomInt(0, firstNames.length - 1)];
-            if (keyLower.includes('last')) return lastNames[randomInt(0, lastNames.length - 1)];
-            return firstNames[randomInt(0, 3)];
-        }
-        if (keyLower.includes('email')) return `user${randomInt(1000,9999)}@gmail.com`;
-        if (keyLower.includes('phone')) return `+614${randomInt(10000000, 99999999)}`;
-        if (keyLower.includes('date')) {
-            const d = new Date();
-            d.setFullYear(d.getFullYear() - randomInt(1, 10));
-            return d.toISOString().replace('Z', '+08:00'); 
-        }
-        if (keyLower.includes('code') && keyLower.includes('postal')) return `${randomInt(6000, 6999)}`;
-        if (keyLower.includes('referral')) return randomString(6).toUpperCase();
-        if (keyLower === 'sex') return Math.random() > 0.5 ? 'Male' : 'Female';
-        if (keyLower.includes('street')) return `${randomInt(1, 100)} Random St`;
-        if (keyLower.includes('city')) return ["Perth", "North Perth", "Subiaco", "Fremantle"][randomInt(0, 3)];
-        if (keyLower === 'number') return `${randomInt(100000000, 999999999)}`;
-        return value;
-    }
-    return value;
-}
-
-function randomizeObject(obj: any) {
-    for (const key of Object.keys(obj)) {
-        if (key === '__PHP_CLASS_NAME__') continue;
-        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) { 
-             randomizeObject(obj[key]);
-        } else {
-             obj[key] = randomizeValue(key, obj[key]);
-        }
-    }
-}
-
-// --- Interactive Editing Logic ---
-
-async function manualEditObject(obj: any, ask: (q: string) => Promise<string>, path = "") {
-    for (const key of Object.keys(obj)) {
-        if (key === '__PHP_CLASS_NAME__') continue;
-        
-        const fullPath = path ? `${path}.${key}` : key;
-        const val = obj[key];
-        
-        if (typeof val === 'object' && val !== null && !Array.isArray(val)) {
-             await manualEditObject(val, ask, fullPath);
-        } else {
-             const answer = await ask(`${fullPath} [${val}]: `);
-             if (answer.trim() !== "") {
-                 if (typeof val === 'number') obj[key] = Number(answer);
-                 else if (typeof val === 'boolean') obj[key] = (answer === '1' || answer.toLowerCase() === 'true');
-                 else obj[key] = answer;
-             }
-        }
-    }
+    return lines.join("\n");
 }
 
 // --- Main CLI ---
 
-const DEFAULT_COOKIE_VALUE = "O%3A8%3A%22stdClass%22%3A25%3A%7Bs%3A9%3A%22firstName%22%3Bs%3A5%3A%22Daffa%22%3Bs%3A10%3A%22secondName%22%3Bs%3A0%3A%22%22%3Bs%3A8%3A%22lastName%22%3Bs%3A11%3A%22Fathurohman%22%3Bs%3A10%3A%22homeClubId%22%3Bi%3A10%3Bs%3A8%3A%22isActive%22%3Bb%3A1%3Bs%3A11%3A%22isForeigner%22%3Bb%3A0%3Bs%3A6%3A%22number%22%3Bs%3A9%3A%22109012239%22%3Bs%3A11%3A%22phoneNumber%22%3Bs%3A12%3A%22%2B61415131283%22%3Bs%3A5%3A%22email%22%3Bs%3A16%3A%22ddarm4%40gmail.com%22%3Bs%3A10%3A%22personalId%22%3BN%3Bs%3A3%3A%22sex%22%3Bs%3A4%3A%22Male%22%3Bs%3A9%3A%22birthdate%22%3Bs%3A25%3A%222003-08-12T00%3A00%3A00%2B08%3A00%22%3Bs%3A12%3A%22consultantId%22%3Bi%3A3%3Bs%3A12%3A%22referralCode%22%3Bs%3A6%3A%222LE2TY%22%3Bs%3A19%3A%22isPaymentInProgress%22%3Bb%3A0%3Bs%3A10%3A%22memberType%22%3Bs%3A6%3A%22Member%22%3Bs%3A23%3A%22emailVerificationStatus%22%3Bs%3A4%3A%22None%22%3Bs%3A29%3A%22phoneNumberVerificationStatus%22%3Bs%3A4%3A%22None%22%3Bs%3A13%3A%22citizenshipId%22%3BN%3Bs%3A11%3A%22createdDate%22%3Bs%3A25%3A%222023-07-09T15%3A22%3A29%2B08%3A00%22%3Bs%3A9%3A%22isDeleted%22%3Bb%3A0%3Bs%3A7%3A%22version%22%3Bi%3A1662817461%3Bs%3A2%3A%22id%22%3Bi%3A776473%3Bs%3A7%3A%22address%22%3BO%3A8%3A%22stdClass%22%3A7%3A%7Bs%3A6%3A%22street%22%3Bs%3A10%3A%2243%20view%20st%22%3Bs%3A21%3A%22additionalAddressLine%22%3BN%3Bs%3A10%3A%22postalCode%22%3Bs%3A4%3A%226006%22%3Bs%3A4%3A%22city%22%3Bs%3A11%3A%22North%20Perth%22%3Bs%3A5%3A%22state%22%3BN%3Bs%3A7%3A%22country%22%3Bs%3A9%3A%22Australia%22%3Bs%3A8%3A%22memberId%22%3Bi%3A776473%3B%7Ds%3A15%3A%22membershipLevel%22%3Bi%3A1%3B%7D";
+const serializer = new PHPSerializer();
+
+function parseCookie(raw: string): any {
+    let decoded = raw;
+    if (raw.includes("%")) decoded = decodeURIComponent(raw);
+    if (decoded.startsWith("Member=")) decoded = decoded.slice(7);
+    return serializer.unserialize(decoded);
+}
 
 async function main() {
-    let inputStr = DEFAULT_COOKIE_VALUE;
-    
-    // Check CLI arguments for a custom serialized string
-    const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
-    if (args.length > 0) {
-        inputStr = args[0];
-        if (inputStr.includes("=")) inputStr = inputStr.split("=")[1];
+    const args = process.argv.slice(2);
+
+    if (args.length === 0) {
+        console.log("Usage:");
+        console.log("  bun run Scraper/cookie_editor.ts <cookie_string>              # decode + print one cookie");
+        console.log("  bun run Scraper/cookie_editor.ts <input.json> --diff <cookieN> # diff all cookies in JSON vs cookieN");
+        console.log("  bun run Scraper/cookie_editor.ts <input.json> --diff-all        # diff all cookies against each other");
+        console.log("  bun run Scraper/cookie_editor.ts <input.json> --serialize       # re-serialize all cookies");
+        console.log("  bun run Scraper/cookie_editor.ts <input.json> --output <file.json>  # save parsed cookies to JSON");
+        process.exit(0);
     }
 
-    console.log("Decoding Input...");
-    const decoded = inputStr.includes('%') ? decodeURIComponent(inputStr) : inputStr;
-    
-    const serializer = new PHPSerializer();
-    let data;
+    const inputPath = args[0];
+    const isJsonFile = inputPath.endsWith(".json") && existsSync(inputPath);
+
+    if (!isJsonFile) {
+        // Single cookie decode
+        const raw = args[0];
+        const data = parseCookie(raw);
+        console.log(JSON.stringify(data, null, 2));
+        return;
+    }
+
+    // Load JSON file
+    const rawContent = readFileSync(inputPath, "utf-8");
+    let cookieStrings: string[];
     try {
-        data = serializer.unserialize(decoded);
+        const parsed = JSON.parse(rawContent);
+        if (Array.isArray(parsed)) {
+            cookieStrings = parsed;
+        } else if (typeof parsed === "object" && parsed !== null) {
+            // Treat as a cookies object (e.g. { "cookies": [...] } or just keys with cookie values)
+            const keys = Object.keys(parsed);
+            cookieStrings = keys.map(k => (parsed as any)[k]);
+        } else {
+            console.error("JSON must be an array or object of cookie strings.");
+            process.exit(1);
+        }
     } catch (e) {
-        console.error("\x1b[31mError:\x1b[0m Failed to unserialize! Check your input string.");
-        console.error(e);
+        console.error("Failed to parse JSON file:", e);
         process.exit(1);
     }
 
-    const isRandomize = process.argv.includes('--randomize');
+    console.log(`Loaded ${cookieStrings.length} cookies from ${inputPath}`);
 
-    if (isRandomize) {
-        console.log("Applying Randomization...");
-        randomizeObject(data);
-        if (data.id && data.address && data.address.memberId) data.address.memberId = data.id; // Sync IDs
-        console.log("Done.");
-    } else {
-        const rl = createInterface({ input: process.stdin, output: process.stdout });
-        const ask = (q: string): Promise<string> => new Promise(r => rl.question(q, r));
-        
-        console.log("\n--- Edit Values (Enter to skip) ---");
-        await manualEditObject(data, ask);
-        rl.close();
+    // Parse all cookies
+    const parsed = cookieStrings.map((c, i) => {
+        try {
+            return { index: i, data: parseCookie(c), error: null };
+        } catch (e: any) {
+            return { index: i, data: null, error: e.message };
+        }
+    });
+
+    const hasErrors = parsed.some(p => p.error !== null);
+    if (hasErrors) {
+        console.error("\nFailed to parse some cookies:");
+        for (const p of parsed) {
+            if (p.error) console.error(`  Cookie ${p.index}: ${p.error}`);
+        }
+        process.exit(1);
     }
 
-    const finalValue = serializer.serialize(data);
-    const finalCookie = `Member=${encodeURIComponent(finalValue)}`;
+    // Handle commands
+    if (args.includes("--diff-all")) {
+        console.log("\n=== PAIRWISE DIFFS (first cookie vs each subsequent) ===\n");
+        const base = parsed[0].data;
+        for (let i = 1; i < parsed.length; i++) {
+            console.log(`--- Cookie 0 vs Cookie ${i} ---`);
+            const diffs = diffObjects(base, parsed[i].data);
+            if (Object.keys(diffs).length === 0) {
+                console.log("  (no differences)");
+            } else {
+                console.log(summarizeDiffs(diffs, `Cookie 0 (${cookieStrings[0].slice(7, 40)}...)`, `Cookie ${i}`));
+            }
+            console.log();
+        }
+        return;
+    }
 
-    console.log("\n--- NEW COOKIE STRING ---");
-    console.log(finalCookie);
-    console.log("-------------------------");
+    const diffIndex = args.indexOf("--diff");
+    if (diffIndex !== -1 && args[diffIndex + 1] !== undefined) {
+        const targetRaw = args[diffIndex + 1];
+        const targetCookie = parseCookie(targetRaw);
+        console.log(`\n=== DIFFING ALL COOKIES vs provided cookie ===\n`);
+        for (let i = 0; i < parsed.length; i++) {
+            const diffs = diffObjects(parsed[i].data, targetCookie);
+            if (Object.keys(diffs).length === 0) {
+                console.log(`Cookie ${i}: IDENTICAL`);
+            } else {
+                console.log(`--- Cookie ${i} vs target ---`);
+                console.log(summarizeDiffs(diffs, `Cookie ${i}`, "Target"));
+            }
+            console.log();
+        }
+        return;
+    }
+
+    if (args.includes("--serialize")) {
+        console.log("\n=== RE-SERIALIZED COOKIES ===\n");
+        const output = cookieStrings.map(c => {
+            const data = parseCookie(c);
+            const ser = serializer.serialize(data);
+            return `Member=${encodeURIComponent(ser)}`;
+        });
+        console.log(JSON.stringify(output, null, 2));
+        return;
+    }
+
+    const outputIndex = args.indexOf("--output");
+    if (outputIndex !== -1 && args[outputIndex + 1] !== undefined) {
+        const outPath = args[outputIndex + 1];
+        const output = parsed.map(p => p.data);
+        writeFileSync(outPath, JSON.stringify(output, null, 2));
+        console.log(`Wrote ${output.length} parsed cookies to ${outPath}`);
+        return;
+    }
+
+    // Default: print all parsed cookies
+    for (const p of parsed) {
+        console.log(`\n=== COOKIE ${p.index} ===`);
+        console.log(JSON.stringify(p.data, null, 2));
+    }
 }
 
 main();
