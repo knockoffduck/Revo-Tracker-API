@@ -5,7 +5,7 @@
  * Supports: strings, integers, floats, booleans, null, arrays, and objects (stdClass).
  */
 
-class PHPSerializer {
+export class PHPSerializer {
     private offset: number = 0;
     private data: string = "";
 
