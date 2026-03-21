@@ -177,7 +177,7 @@ function main() {
     const serializer = new PHPSerializer();
     const results = [];
     
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
         const data = serializer.unserialize(decodeURIComponent(DEFAULT_STR));
         randomizeProfile(data);
         const serialized = serializer.serialize(data);
@@ -187,7 +187,7 @@ function main() {
     const cookiePath = join(__dirname, "cookies.json");
     mkdirSync(__dirname, { recursive: true });
     writeFileSync(cookiePath, JSON.stringify(results, null, 2));
-    console.log("Successfully generated 5 cookies and saved to Scraper/cookies.json");
+    console.log("Successfully generated 10 cookies and saved to Scraper/cookies.json");
 }
 
 main();
