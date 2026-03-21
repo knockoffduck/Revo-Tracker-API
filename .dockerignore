@@ -1,0 +1,9 @@
+node_modules
+.git
+.env
+*.log
+reports/
+tests/
+Scraper/
+drizzle/
+scripts/
