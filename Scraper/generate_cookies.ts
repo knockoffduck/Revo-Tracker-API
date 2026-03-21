@@ -1,4 +1,5 @@
-import { writeFileSync } from "fs";
+import { writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 
 // --- PHP Serialization/Deserialization Logic ---
 
@@ -183,7 +184,9 @@ function main() {
         results.push(`Member=${encodeURIComponent(serialized)}`);
     }
 
-    writeFileSync("/Users/daffydvck/Projects/Revo-Tracker-API/Scraper/cookies.json", JSON.stringify(results, null, 2));
+    const cookiePath = join(__dirname, "cookies.json");
+    mkdirSync(__dirname, { recursive: true });
+    writeFileSync(cookiePath, JSON.stringify(results, null, 2));
     console.log("Successfully generated 5 cookies and saved to Scraper/cookies.json");
 }
 
