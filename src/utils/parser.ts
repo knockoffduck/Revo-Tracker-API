@@ -7,6 +7,22 @@ import { simpleIntegerHash } from "./tools";
 import { sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { axiosGetWithProxyFallback } from "./proxy";
+import { PHPSerializer } from "../../Scraper/deserializer";
+
+const cookieToReadable = (cookie: string): string => {
+	try {
+		// Cookie format: "Member=<serialized>"
+		const serialized = cookie.includes("=") ? cookie.split("=")[1] : cookie;
+		const decoded = decodeURIComponent(serialized);
+		const serializer = new PHPSerializer();
+		const obj = serializer.unserialize(decoded);
+		// Return just the key identity fields for logging
+		return `${obj.firstName} ${obj.lastName} (${obj.email})`;
+	} catch {
+		// Fallback to raw truncated string if deserialization fails
+		return cookie.length > 60 ? cookie.substring(0, 60) + "..." : cookie;
+	}
+};
 
 const refreshCookies = async () => {
 	try {
@@ -87,7 +103,7 @@ const fetchPHPData = async (): Promise<{ $: cheerio.CheerioAPI; clubCounts: { na
 	for (let i = 0; i < cookies.length; i++) {
 		const cookie = cookies[i];
 		// Truncate cookie for log readability — it's a long encoded string
-		const cookieLabel = cookie.length > 60 ? cookie.substring(0, 60) + "..." : cookie;
+		const cookieLabel = cookieToReadable(cookie);
 		console.log(`[Parser] Trying cookie #${i + 1}/${cookies.length}: ${cookieLabel}`);
 
 		const $ = await fetchPHPDataWithCookie(cookie);
