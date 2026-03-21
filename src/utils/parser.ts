@@ -4,7 +4,7 @@ import { file } from "bun";
 import { db } from "./database";
 import { revoGymCount, revoGyms } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
-import { sql } from "drizzle-orm";
+import { sql, eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
@@ -347,7 +347,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const { $, clubCounts } = result;
 	const parseDuration = Date.now() - parseStart;
 
-	const existingGyms = await db.select().from(revoGyms);
+	const existingGyms = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
 
@@ -399,7 +399,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	console.log(`${STAGE.DB} PHASE 2: Database Write`);
 
 	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
-	const gymList = await db.select().from(revoGyms);
+	const gymList = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	let inserts = 0;
@@ -485,7 +485,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 
 export const updateGymInfo = async (gymData: GymInfo[]) => {
 	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
-	const gymList = await db.select().from(revoGyms);
+	const gymList = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	let updates = 0;
