@@ -14,8 +14,7 @@
 ```
 /src
   index.ts              # API server entry — routes, scheduler, startup
-  auto.ts               # Standalone 5-minute cron that hits the production API
-  auto.ts              # Standalone cron script for remote deployment
+  auto.ts               # Standalone cron script for remote/offsite triggers
   agents/
     trendAgent.ts       # Pre-computes gym attendance trends (popular times)
     statAudit.ts        # Detects and repairs anomalous zero-occupancy readings
@@ -23,7 +22,7 @@
     schema.ts           # ALL database tables (Drizzle ORM)
     relations.ts        # Table relations
   utils/
-    parser.ts           # Core scraping logic — fetches & parses gym member counts
+    parser.ts           # Core scraping — fetch, cookie cycling, parse, DB write
     details.ts          # Scrapes individual gym pages for squat rack counts
     database.ts         # MySQL connection via Drizzle
     proxy.ts            # HTTP proxy with fallback logic (Webshare)
@@ -33,12 +32,14 @@
     gyms.json           # Static registry of ~50 known gym names and sizes
     geocoder.ts         # (present but not referenced in core flows)
 /Scraper
-  generate_cookies.ts   # Generates PHP-serialized member cookies for auth
-  cookies.json           # Rotating cookie jar (5 members, refreshed daily)
+  generate_cookies.ts   # Generates PHP-serialized member cookies (default: 10)
+  cookies.json          # Rotating cookie jar — refreshed daily, 10 members
+  deserializer.ts       # PHPSerializer class — unserializes PHP format to JSON
+  test_cookies.ts       # Validates cookies by proxy; reports which are broken
+  test_proxies.ts       # Proxy health checker (auto + manual modes)
+  cookie_editor.ts      # Manual cookie editor
   club-counter.php      # PHP scraper (reference only, not used at runtime)
-  test_proxies.ts       # Proxy health checker
-  cookie_editor.ts       # Manual cookie editor
-  proxies.json           # List of known proxy IPs
+  proxies.json          # List of known Webshare proxy IPs
 /reports
   dropouts*.json        # statAudit repair reports
 /scripts
@@ -49,6 +50,8 @@
   *.test.ts             # Bun test suite (60 tests)
 /logs
   updated_stats.json     # Last 5 scrape sessions (rolling)
+/Dockerfile              # Multi-stage bun build — production deps only
+docker-compose.yml       # Single-service compose for local dev
 .env                     # DATABASE_URL, PROXY_*, etc.
 drizzle.config.ts        # Drizzle Kit config
 package.json
@@ -117,17 +120,44 @@ All responses follow `{ success: true, data: ... }` or `{ success: false, error:
 
 ### Scraping (parseHTML → insertGymStats)
 
-1. `fetchPHPData()` — calls `https://revocentral.revofitness.com.au/club-counter.php?id=10` using a rotated cookie from `Scraper/cookies.json` and the configured proxy
-2. `extractClubCounts()` — parses `var clubCounterLists = {...}` JSON block from the page; fallback is DOM parsing via `.attr('data-member-in-club')`
-3. `parseHTML()` — joins scraped counts with gym metadata from `Revo_Gyms` using **normalized name matching** (NFKD normalization, apostrophe strip, lowercase) to handle `O'Connor` vs `OConnor`
-4. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. For gyms that were in the DB but not in the scrape, inserts a 0-count row (this is the "missing gyms" log). Writes a rolling log to `logs/updated_stats.json`.
+1. `fetchPHPData()` — reads all cookies from `Scraper/cookies.json`, tries them one at a time in order until one returns > 0 gyms, or all are exhausted
+2. Each cookie attempt calls `fetchPHPDataWithCookie()` (up to 2 retries on network errors)
+3. After a successful fetch, `extractClubCounts()` parses `var clubCounterLists = {...}` JSON block; fallback is DOM parsing via `.attr('data-member-in-club')`
+4. `parseHTML()` — joins scraped counts with gym metadata from `Revo_Gyms` using **normalized name matching** (NFKD normalization, apostrophe strip, lowercase) to handle `O'Connor` vs `OConnor`
+5. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. For gyms that were in the DB but not in the scrape, inserts a 0-count row. Writes a rolling log to `logs/updated_stats.json`
 
 ### Cookie Rotation
-- `Scraper/cookies.json` holds 5 PHP-serialized member cookie strings
-- Refreshed daily OR if file doesn't exist via `bun run Scraper/generate_cookies.ts`
+
+- `Scraper/cookies.json` holds 10 PHP-serialized member cookie strings
+- Refreshed daily (if file older than 24h) OR if file doesn't exist via `bun run Scraper/generate_cookies.ts`
+- `fetchPHPData()` cycles through all cookies sequentially — the first one to return > 0 gyms is used; all others are skipped
+- If a cookie returns 0 gyms, it is marked invalid and logged with `⚠ 0 gyms returned`
+- If a cookie fails on network level, it is logged with `✖ network error` and the actual error message
 - **Critical:** Write path in `generate_cookies.ts` uses `join(__dirname, "cookies.json")` — do not hardcode absolute paths
+- **Critical:** `Scraper/deserializer.ts` uses `if (import.meta.main)` guard — `run()` only executes when the file is run directly, not when imported as a module
+
+### Cookie Validation
+
+```bash
+bun run Scraper/test_cookies.ts
+```
+
+- Reads `cookies.json` and `proxies.json`
+- Tests each cookie via a different proxy (round-robin) against the club-counter endpoint
+- Reports gym count per cookie: `✔ 75 gyms` or `⚠ 0 gyms` or `✖ network error`
+- Exits 1 if any cookie is invalid — useful for CI/health checks
+- Run `bun run Scraper/generate_cookies.ts` to regenerate invalid cookies
+
+### Cookie Identity Logging
+
+Cookies are deserialized via `PHPSerializer` for human-readable logging:
+```
+[FETCH] [1/10] James Wilson <james.wilson@gmail.com> ... ✔ 85 gyms (3102ms)
+```
+If deserialization fails, falls back to the raw truncated string.
 
 ### Gym ID Generation
+
 - `simpleIntegerHash(name + postcode)` — deterministic 24-bit hash
 - Used as the primary key when inserting new gyms (before they exist in DB)
 - Not globally unique — collisions possible but probabilistically negligible
@@ -150,7 +180,7 @@ The PHP portal page structure is the single point of failure:
 - If Revo Fitness changes class names, attributes, or the JS variable — scraping breaks silently and returns 0 gyms
 
 ### Missing gyms
-Gyms that exist in `Revo_Gyms` but not in the scrape get a 0-count inserted. Common reasons: gym temporarily unavailable, proxy failure, cookie expiry. These appear in logs as "Missing gyms in current scrape".
+Gyms that exist in `Revo_Gyms` but not in the scrape get a 0-count inserted. Common reasons: gym temporarily unavailable, proxy failure, cookie expiry. These appear in logs as "known gyms missing from scrape" and are listed individually by name and postcode.
 
 ### O'Connor / OConnor naming
 The scraper source uses `OConnor` (no apostrophe). Normalization in `normalizeGymName()` strips apostrophes to match. Be aware when adding gym filters or comparing names.
@@ -199,13 +229,39 @@ Outputs:
 ## 8. Development Commands
 
 ```bash
-bun install          # Install dependencies
-bun run dev          # Start dev server (port 3001, hot reload)
-bun test             # Run all tests (60 tests)
-bun run audit:dropouts  # Run statAudit (dry-run by default)
+bun install              # Install dependencies
+bun run dev              # Start dev server (port 3001, hot reload)
+bun run start            # Start production server
+bun test                 # Run all tests (60 tests)
+bun run audit:dropouts   # Run statAudit (dry-run by default)
+
+# Cookie management
+bun run Scraper/generate_cookies.ts  # Generate 10 fresh cookies
+bun run Scraper/test_cookies.ts      # Validate all cookies via proxy
+bun run Scraper/test_proxies.ts      # Check proxy health
 ```
 
 ### Deployment
+
+**Docker:**
+```bash
+docker build -t revo-tracker-api .
+docker compose up -d
+```
+- Uses multi-stage Dockerfile (deps stage + runtime stage)
+- Runs as non-root user `appuser` (UID 1001)
+- `logs/` directory created with correct ownership in image
+- `Scraper/` directory included in image (required for cookie generation at runtime)
+- Healthcheck: `curl http://localhost:3001/` every 30s
+- Memory limit: 512MB (via compose deploy config)
+
+**Dokploy:**
+- Push to GitHub — Dokploy pulls from the configured branch
+- Use Dokploy dashboard env panel for `DATABASE_URL`, `DOMAIN_NAME`, `PROXY_*` vars (not `.env`)
+- Dokploy injects env vars at container runtime — `env_file` directive in compose is ignored
+- Set build method: Dockerfile, port: 3001, health check path: `/`
+
+**Local cron (auto.ts):**
 - Server runs on `dvcklab2` (Tailscale IP `100.78.72.83`)
 - Scheduler (`callEveryFiveMinutes`) self-pings `https://revotrackerapi.dvcklab.com/gyms/stats/update`
 - `src/auto.ts` is a standalone version for remote/offsite cron triggers against `https://revotracker.daffydvck.live/api/gyms/stats/update`
@@ -219,7 +275,9 @@ bun run audit:dropouts  # Run statAudit (dry-run by default)
 | Scrape URL | `https://revocentral.revofitness.com.au/club-counter.php?id=10` | parser.ts |
 | Scheduler interval | 5 minutes | index.ts |
 | Cookie refresh | 24 hours | parser.ts (checkAndRefreshCookies) |
-| Cookie count | 5 | generate_cookies.ts |
+| Cookie count | 10 | generate_cookies.ts |
+| Cookie cycle | Sequential (first valid wins) | parser.ts (fetchPHPData) |
+| Cookie network retries | 2 per cookie | parser.ts (fetchPHPDataWithCookie) |
 | Proxy | `p.webshare.io:80` | proxy.ts |
 | Trend lookback | 90 days | trendAgent.ts |
 | Trend slot | 15 minutes → 96 slots/day | trendAgent.ts |
@@ -229,3 +287,59 @@ bun run audit:dropouts  # Run statAudit (dry-run by default)
 | Stat audit min trend samples | 4 | statAudit.ts DEFAULT_MIN_TREND_SAMPLE_COUNT |
 | Estimated capacity divisor | 6 | parser.ts, statAudit.ts |
 | API server port | 3001 | index.ts |
+
+---
+
+## 10. Logging
+
+All output uses structured, phase-based logging with colored icons:
+
+| Icon | Meaning |
+|------|---------|
+| `✔` | Success |
+| `⚠` | Warning (e.g., cookie returned 0 gyms, missing gyms) |
+| `✖` | Failure (network error, all cookies exhausted) |
+
+**Stage prefixes:**
+
+| Prefix | Component |
+|--------|-----------|
+| `[COOKIES]` | Cookie refresh/generation |
+| `[FETCH]` | HTTP fetch and cookie cycling |
+| `[PARSE]` | HTML parsing and data transformation |
+| `[DB]` | Database write operations |
+| `[Details]` | Squat rack enrichment |
+
+**Example scrape session:**
+```
+[PARSE] ═══════════════════════════════════════════════════
+[PARSE] PHASE 1: Fetch & Parse
+[FETCH] Starting scrape session — 10 cookies available
+[FETCH] ─── Cookie Attempt Log ───────────────────────────
+[FETCH] [1/10] James Wilson <james.wilson@gmail.com> ... ✖ network error (1203ms)
+[FETCH]        └─ connect ECONNREFUSED
+[FETCH] [2/10] Emma Taylor <emma.taylor@gmail.com> ... ⚠ 0 gyms returned (4821ms)
+[FETCH]        └─ cookie invalid or blocked
+[FETCH] [3/10] Liam Anderson <liam.anderson@gmail.com> ... ✔ 85 gyms (3102ms)
+[FETCH] ──────────────────────────────────────────────────
+[FETCH] ✔ Cookie valid — 85 gyms found
+[PARSE] Parsed 85 gyms in 3145ms
+[PARSE] Samples: [Ballarat (0), Braybrook (1), Chadstone (0), ...]
+[DB] ═══════════════════════════════════════════════════
+[DB] PHASE 2: Database Write
+[DB] ⚠ 3 known gyms missing from scrape:
+[DB]       - The Glenelg (5045)
+[DB]       - Southland (3193)
+[DB]       - Bunbury (6230)
+[DB] ✔ 88 rows inserted (1240ms)
+[DB]       gyms=85 | missing=3 | total=85
+```
+
+**When all cookies fail:**
+```
+[FETCH] All 10 cookies exhausted — no valid response
+[FETCH] Attempt summary:
+[FETCH]    ✖ [#1] James Wilson  | 1203ms | gyms=0 | connect ECONNREFUSED
+[FETCH]    ⚠ [#2] Emma Taylor   | 4821ms | gyms=0 | cookie invalid or blocked
+[FETCH]    ✔ [#3] Liam Anderson | 3102ms | gyms=85 |
+```
