@@ -285,7 +285,7 @@ docker compose up -d
 | Stat audit min score | 30 | statAudit.ts DEFAULT_MIN_SCORE |
 | Stat audit min trend avg | 20 | statAudit.ts DEFAULT_MIN_TREND_AVERAGE |
 | Stat audit min trend samples | 4 | statAudit.ts DEFAULT_MIN_TREND_SAMPLE_COUNT |
-| Estimated capacity divisor | 6 | parser.ts, statAudit.ts |
+| Estimated capacity divisor | 4 | parser.ts, statAudit.ts |
 | API server port | 3001 | index.ts |
 
 ---
