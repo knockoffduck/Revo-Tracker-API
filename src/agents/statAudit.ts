@@ -101,7 +101,7 @@ export const calculateGymRatios = (size: number, count: number) => {
     }
 
     const memberRatio = size / count;
-    const estimatedCapacity = size / 4;
+    const estimatedCapacity = size / 10;
     const percentage = Math.min((count / estimatedCapacity) * 100, 100);
 
     return { memberRatio, percentage };

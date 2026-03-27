@@ -295,7 +295,7 @@ const buildGymsByNormalizedName = (
 const calculateGymRatios = (size: number, count: number) => {
 	if (size <= 0 || count <= 0) return { memberRatio: 0, percentage: 0 };
 	const memberRatio = size / count;
-	const estimatedCapacity = size / 4;
+	const estimatedCapacity = size / 10;
 	const percentage = Math.min((count / estimatedCapacity) * 100, 100);
 	return { memberRatio, percentage };
 };
