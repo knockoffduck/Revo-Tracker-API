@@ -145,6 +145,41 @@ describe("TrendAgent Unit Tests", () => {
             expect(slot1815.count).toBe(1);
         });
 
+        test("should exclude zero and negative counts from trend averages", () => {
+            const records = [
+                {
+                    created: "2024-01-30 10:00:00", // 18:00 Perth
+                    count: 50,
+                },
+                {
+                    created: "2024-01-30 10:05:00", // 18:00 Perth (rounded)
+                    count: 0, // closed / missing data
+                },
+                {
+                    created: "2024-01-30 10:10:00", // 18:00 Perth (rounded)
+                    count: -5, // invalid reading
+                },
+                {
+                    created: "2024-01-30 10:20:00", // 18:15 Perth
+                    count: 20,
+                },
+            ];
+            const timezone = "Australia/Perth";
+            const dayMap = calculateTrends(records, timezone);
+
+            const tuesdayMap = dayMap.get(2)!;
+
+            // 18:00 should only include the 50 (zeros/negatives skipped)
+            const slot1800 = tuesdayMap.get("18:00")!;
+            expect(slot1800.sum).toBe(50);
+            expect(slot1800.count).toBe(1);
+
+            // 18:15 unchanged
+            const slot1815 = tuesdayMap.get("18:15")!;
+            expect(slot1815.sum).toBe(20);
+            expect(slot1815.count).toBe(1);
+        });
+
         test("should handle empty records", () => {
             const records: { created: string; count: number }[] = [];
             const dayMap = calculateTrends(records, "Australia/Perth");

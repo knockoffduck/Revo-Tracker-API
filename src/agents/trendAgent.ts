@@ -118,6 +118,12 @@ export const calculateTrends = (
     const dayMap = new Map<number, Map<string, { sum: number; count: number }>>();
 
     for (const record of records) {
+        // Skip zero/negative counts so trend averages only reflect periods when the gym
+        // was actually open and reporting members (0 usually means closed or missing data).
+        if (record.count <= 0) {
+            continue;
+        }
+
         try {
             const { dayOfWeek, timeSlot } = getLocalTimeParts(record.created, timezone);
 
