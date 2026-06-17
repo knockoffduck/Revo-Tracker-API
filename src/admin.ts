@@ -24,6 +24,9 @@ import {
 	streamingTrendGenerateForGyms,
 } from "./utils/streaming";
 import { runScript, type ScriptOptions } from "./utils/scriptRunner";
+import { db } from "./utils/database";
+import { user } from "./db/schema";
+import { eq, like, or, desc, sql } from "drizzle-orm";
 
 const app = new Hono();
 
@@ -410,6 +413,145 @@ app.post("/admin/scripts/audit", async (c) => {
 });
 
 // ============ Health check for the admin module ============
+
+// ============ User management ============
+// These endpoints require admin auth even for reads because they expose
+// sensitive user data.
+
+app.use("/admin/users/*", async (c, next) => {
+	if (!isAuthorized(c.req.raw)) {
+		return c.json({ success: false, error: "Unauthorized" }, 401);
+	}
+	await next();
+});
+
+const userSelect = {
+	id: user.id,
+	name: user.name,
+	email: user.email,
+	emailVerified: user.emailVerified,
+	image: user.image,
+	isAdmin: user.isAdmin,
+	createdAt: user.createdAt,
+	updatedAt: user.updatedAt,
+	gymPreferences: user.gymPreferences,
+};
+
+app.get("/admin/users", async (c) => {
+	try {
+		const q = c.req.query("q")?.trim();
+		const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 200);
+		const offset = Math.max(Number(c.req.query("offset") ?? 0), 0);
+		const sort = c.req.query("sort") ?? "createdAt";
+		const order = c.req.query("order") === "asc" ? "asc" : "desc";
+
+		let query = db.select(userSelect).from(user);
+
+		if (q) {
+			const pattern = `%${q}%`;
+			query = query.where(or(like(user.name, pattern), like(user.email, pattern))) as typeof query;
+		}
+
+		const orderColumn =
+			sort === "name" ? user.name :
+			sort === "email" ? user.email :
+			sort === "updatedAt" ? user.updatedAt :
+			user.createdAt;
+
+		const [rows, countResult] = await Promise.all([
+			query
+				.orderBy(order === "desc" ? desc(orderColumn) : sql`${orderColumn} asc`)
+				.limit(limit)
+				.offset(offset),
+			db.select({ count: sql<number>`count(*)` }).from(user),
+		]);
+
+		return c.json({
+			success: true,
+			data: {
+				users: rows,
+				pagination: {
+					limit,
+					offset,
+					total: Number(countResult[0]?.count ?? 0),
+				},
+			},
+		});
+	} catch (err) {
+		return c.json({ success: false, error: (err as Error).message }, 500);
+	}
+});
+
+app.patch("/admin/users/:id", async (c) => {
+	try {
+		const id = c.req.param("id");
+		const body = await c.req.json().catch(() => ({}));
+		if (!body || typeof body !== "object") {
+			return c.json({ success: false, error: "Invalid body" }, 400);
+		}
+
+		const updates: Partial<Record<keyof typeof userSelect, unknown>> = {};
+		if (typeof body.name === "string") updates.name = body.name.trim();
+		if (typeof body.email === "string") updates.email = body.email.trim().toLowerCase();
+		if (typeof body.isAdmin === "boolean") updates.isAdmin = body.isAdmin ? 1 : 0;
+
+		if (Object.keys(updates).length === 0) {
+			return c.json({ success: false, error: "No fields to update" }, 400);
+		}
+
+		// Prevent removing admin status from the last admin.
+		if (updates.isAdmin === 0) {
+			const current = await db.select({ isAdmin: user.isAdmin }).from(user).where(eq(user.id, id));
+			if (current[0]?.isAdmin) {
+				const admins = await db.select({ count: sql<number>`count(*)` }).from(user).where(eq(user.isAdmin, 1));
+				if (Number(admins[0]?.count ?? 0) <= 1) {
+					return c.json({ success: false, error: "Cannot remove the last admin" }, 400);
+				}
+			}
+		}
+
+		await db
+			.update(user)
+			.set({
+				...(typeof body.name === "string" ? { name: body.name.trim() } : {}),
+				...(typeof body.email === "string" ? { email: body.email.trim().toLowerCase() } : {}),
+				...(typeof body.isAdmin === "boolean" ? { isAdmin: body.isAdmin ? 1 : 0 } : {}),
+			})
+			.where(eq(user.id, id));
+		const [updated] = await db.select(userSelect).from(user).where(eq(user.id, id));
+
+		if (!updated) {
+			return c.json({ success: false, error: "User not found" }, 404);
+		}
+
+		return c.json({ success: true, data: updated });
+	} catch (err) {
+		return c.json({ success: false, error: (err as Error).message }, 500);
+	}
+});
+
+app.delete("/admin/users/:id", async (c) => {
+	try {
+		const id = c.req.param("id");
+
+		// Prevent deleting the last admin.
+		const target = await db.select({ isAdmin: user.isAdmin }).from(user).where(eq(user.id, id));
+		if (!target.length) {
+			return c.json({ success: false, error: "User not found" }, 404);
+		}
+		if (target[0]?.isAdmin) {
+			const admins = await db.select({ count: sql<number>`count(*)` }).from(user).where(eq(user.isAdmin, 1));
+			if (Number(admins[0]?.count ?? 0) <= 1) {
+				return c.json({ success: false, error: "Cannot delete the last admin" }, 400);
+			}
+		}
+
+		await db.delete(user).where(eq(user.id, id));
+		return c.json({ success: true, data: { id, deleted: true } });
+	} catch (err) {
+		return c.json({ success: false, error: (err as Error).message }, 500);
+	}
+});
 
 app.get("/admin/health", (c) =>
 	c.json({
