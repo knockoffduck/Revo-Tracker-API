@@ -21,6 +21,7 @@ import {
 	streamingUpdateGyms,
 	streamingLatestStats,
 	streamingTrendGenerate,
+	streamingTrendGenerateForGyms,
 } from "./utils/streaming";
 import { runScript, type ScriptOptions } from "./utils/scriptRunner";
 
@@ -358,6 +359,19 @@ app.post("/admin/gyms/trends/generate-stream", async (c) => {
 		// ignore
 	}
 	return makeSseResponse(() => streamingTrendGenerate(lookback));
+});
+
+app.post("/admin/gyms/trends/generate-for-gyms-stream", async (c) => {
+	let lookback = 90;
+	let gymIds: string[] = [];
+	try {
+		const body = await c.req.json().catch(() => ({}));
+		if (body && typeof body.lookback === "number") lookback = body.lookback;
+		if (body && Array.isArray(body.gymIds)) gymIds = body.gymIds.filter((id: unknown) => typeof id === "string");
+	} catch {
+		// ignore
+	}
+	return makeSseResponse(() => streamingTrendGenerateForGyms(gymIds, lookback));
 });
 
 // ============ Script runner endpoints ============

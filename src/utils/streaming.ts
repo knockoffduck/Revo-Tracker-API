@@ -6,7 +6,7 @@
 
 import { progressBus } from "./progress";
 import { parseHTML, updateGymInfo, insertGymStats } from "./parser";
-import { runTrendAgent } from "../agents/trendAgent";
+import { runTrendAgent, generateTrendsForGyms } from "../agents/trendAgent";
 import { db } from "./database";
 import { revoGymCount, revoGyms } from "../db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -100,19 +100,46 @@ export async function streamingTrendGenerate(lookbackDays: number) {
 	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Starting trend generation (lookback=${lookbackDays})` });
 	emit({ type: "progress", phase: "starting", percent: 0 });
 
-	// Wrap runTrendAgent to emit per-gym progress
 	const allGyms = await db
 		.select({ id: revoGyms.id, name: revoGyms.name })
 		.from(revoGyms);
 	const total = allGyms.length;
 	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Found ${total} gyms to process` });
 
-	// We delegate to the existing function but progress is best-effort
-	// because runTrendAgent processes them internally. We re-implement the
-	// loop here so we can emit per-gym progress.
 	try {
 		emit({ type: "progress", phase: "processing", total, current: 0, percent: 0 });
 		const result = await runTrendAgent(lookbackDays);
+		emit({ type: "progress", phase: "processing", total, current: total, percent: 100 });
+		emit({
+			type: "log",
+			level: result.success ? "success" : "error",
+			stage: "TrendAgent",
+			message: `Completed — processed ${result.gymsProcessed} gym(s)`,
+		});
+		emit({ type: "result", data: result });
+	} catch (err) {
+		emit({ type: "error", message: (err as Error).message });
+	}
+	emit({ type: "done" });
+}
+
+export async function streamingTrendGenerateForGyms(gymIds: string[], lookbackDays: number) {
+	const ids = gymIds.filter(Boolean);
+	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Starting trend generation for ${ids.length} gym(s) (lookback=${lookbackDays})` });
+	emit({ type: "progress", phase: "starting", percent: 0 });
+
+	if (ids.length === 0) {
+		emit({ type: "error", message: "No gymIds provided" });
+		emit({ type: "done" });
+		return;
+	}
+
+	const total = ids.length;
+	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Found ${total} gym(s) to process` });
+
+	try {
+		emit({ type: "progress", phase: "processing", total, current: 0, percent: 0 });
+		const result = await generateTrendsForGyms(ids, lookbackDays);
 		emit({ type: "progress", phase: "processing", total, current: total, percent: 100 });
 		emit({
 			type: "log",

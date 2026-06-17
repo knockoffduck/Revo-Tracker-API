@@ -13,7 +13,7 @@
 
 import { db } from "../utils/database";
 import { revoGymCount, revoGyms, gymTrendCache } from "../db/schema";
-import { gte, sql, eq, and } from "drizzle-orm";
+import { gte, sql, eq, and, inArray } from "drizzle-orm";
 
 // Type definitions
 export interface TimeSlotAverage {
@@ -196,6 +196,88 @@ export const upsertTrendCache = async (
         });
 };
 
+type GymInfo = { id: string; name: string; timezone: string };
+
+/**
+ * Processes trend data for a single gym and upserts all 7 days into the cache.
+ */
+export const processGymTrends = async (
+    gym: GymInfo,
+    lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
+): Promise<{ success: true } | { success: false; error: string }> => {
+    try {
+        const records = await fetchGymData(gym.id, lookbackDays);
+
+        if (records.length === 0) {
+            return { success: false, error: `No data for ${gym.name} (${gym.id})` };
+        }
+
+        const dayTrends = calculateTrends(records, gym.timezone);
+
+        for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+            const dayData = dayTrends.get(dayOfWeek);
+            const formattedData = formatTrendDataForDay(dayData);
+            await upsertTrendCache(gym.id, dayOfWeek, formattedData);
+        }
+
+        return { success: true };
+    } catch (err) {
+        const error = `Failed processing gym ${gym.name} (${gym.id}): ${err}`;
+        console.error(`[TrendAgent] ${error}`);
+        return { success: false, error };
+    }
+};
+
+/**
+ * Generates trend data for a specific gym ID or a list of gym IDs.
+ * Missing/invalid IDs are reported in the errors array but don't stop processing.
+ */
+export const generateTrendsForGyms = async (
+    gymIds: string | string[],
+    lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
+): Promise<{ success: boolean; gymsProcessed: number; errors: string[] }> => {
+    const ids = Array.isArray(gymIds) ? gymIds : [gymIds];
+    const errors: string[] = [];
+    let gymsProcessed = 0;
+
+    if (ids.length === 0) {
+        return { success: true, gymsProcessed: 0, errors: [] };
+    }
+
+    console.log(`[TrendAgent] Generating trends for ${ids.length} gym(s) with ${lookbackDays}-day lookback...`);
+
+    try {
+        const gyms = await db
+            .select({ id: revoGyms.id, name: revoGyms.name, timezone: revoGyms.timezone })
+            .from(revoGyms)
+            .where(inArray(revoGyms.id, ids));
+
+        const foundIds = new Set(gyms.map((g) => g.id));
+        for (const id of ids) {
+            if (!foundIds.has(id)) {
+                errors.push(`Gym not found: ${id}`);
+            }
+        }
+
+        for (let i = 0; i < gyms.length; i++) {
+            const gym = gyms[i];
+            gymsProcessed++;
+            console.log(`[TrendAgent] Processing ${i + 1}/${gyms.length}: ${gym.name} (${gym.id})`);
+
+            const result = await processGymTrends(gym, lookbackDays);
+            if (!result.success) {
+                errors.push(result.error);
+            }
+        }
+
+        console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gym(s).`);
+        return { success: errors.length === 0, gymsProcessed, errors };
+    } catch (error) {
+        console.error("[TrendAgent] Fatal error:", error);
+        return { success: false, gymsProcessed, errors: [String(error)] };
+    }
+};
+
 /**
  * Main agent function
  */
@@ -220,41 +302,14 @@ export const runTrendAgent = async (
             gymsProcessed++;
             console.log(`[TrendAgent] Processing ${gymsProcessed}/${allGyms.length}: ${gym.name} (${gym.id})`);
 
-            try {
-                // Fetch data for this gym only
-                const records = await fetchGymData(gym.id, lookbackDays);
-
-                if (records.length === 0) {
-                    // No data, maybe new gym or inactive. Skip calculation but log it.
-                    // console.log(`[TrendAgent] No data for ${gym.name}, skipping...`);
-                    continue;
-                }
-
-                // Calculate trends
-                const dayTrends = calculateTrends(records, gym.timezone);
-
-                // Upsert for all 7 days
-                for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
-                    try {
-                        const dayData = dayTrends.get(dayOfWeek);
-                        const formattedData = formatTrendDataForDay(dayData);
-                        await upsertTrendCache(gym.id, dayOfWeek, formattedData);
-                    } catch (err) {
-                        const errMsg = `Failed upsert for ${gym.name} day ${dayOfWeek}: ${err}`;
-                        console.error(`[TrendAgent] ${errMsg}`);
-                        errors.push(errMsg);
-                    }
-                }
-
-            } catch (err) {
-                const errMsg = `Failed processing gym ${gym.name}: ${err}`;
-                console.error(`[TrendAgent] ${errMsg}`);
-                errors.push(errMsg);
+            const result = await processGymTrends(gym, lookbackDays);
+            if (!result.success) {
+                errors.push(result.error);
             }
         }
 
         console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gyms.`);
-        return { success: true, gymsProcessed, errors };
+        return { success: errors.length === 0, gymsProcessed, errors };
     } catch (error) {
         console.error("[TrendAgent] Fatal error:", error);
         return { success: false, gymsProcessed, errors: [String(error)] };
