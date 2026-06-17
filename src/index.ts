@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { handleError, handleSuccess } from "./utils/handlers";
 import { insertGymStats, parseHTML, updateGymInfo } from "./utils/parser";
 import { GymInfo } from "./utils/types";
@@ -6,8 +7,49 @@ import { enrichGymData } from "./utils/details";
 import { db } from "./utils/database";
 import { revoGymCount } from "./db/schema";
 import { desc, eq } from "drizzle-orm";
+import admin from "./admin";
 
 const app = new Hono();
+
+// CORS — allow the Next.js dev server (and any localhost/private-IP origin)
+// to call this API. In production, set CORS_ORIGINS to the frontend domain(s).
+const configuredOrigins = process.env.CORS_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? [];
+const allowPrivateIps = process.env.CORS_ALLOW_PRIVATE_IPS === "1" || configuredOrigins.length === 0;
+
+const isPrivateDevOrigin = (origin: string) => {
+	try {
+		const { hostname } = new URL(origin);
+		const is172Private = /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+		return (
+			hostname === "localhost" ||
+			hostname === "127.0.0.1" ||
+			hostname.startsWith("192.168.") ||
+			hostname.startsWith("10.") ||
+			is172Private
+		);
+	} catch {
+		return false;
+	}
+};
+
+app.use(
+	"*",
+	cors({
+		origin: (origin) => {
+			if (!origin) return configuredOrigins[0] ?? "*";
+			if (configuredOrigins.includes(origin)) return origin;
+			if (allowPrivateIps && isPrivateDevOrigin(origin)) return origin;
+			return null;
+		},
+		allowHeaders: ["Content-Type", "Authorization", "X-Admin-Token"],
+		allowMethods: ["GET", "POST", "OPTIONS"],
+		exposeHeaders: ["Content-Length"],
+		credentials: true,
+	}),
+);
+
+// Mount admin module (own auth, see src/admin.ts)
+app.route("/", admin);
 
 const callEveryFiveMinutes = () => {
   const ENDPOINT = "https://revotrackerapi.dvcklab.com/gyms/stats/update"; // or your production URL
