@@ -59,7 +59,13 @@ const isAuthorized = (req: Request) => {
 	return false;
 };
 
+// TODO: Re-enable auth for GET requests before shipping to production.
+// For now, only state-changing requests (POST/PUT/PATCH/DELETE) require auth
+// so the dashboard can be used without configuring ADMIN_TOKEN during early dev.
 app.use("*", async (c, next) => {
+	if (c.req.method === "GET") {
+		return await next();
+	}
 	if (!isAuthorized(c.req.raw)) {
 		return c.json({ success: false, error: "Unauthorized" }, 401);
 	}
