@@ -510,6 +510,7 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			state: sql`values(${revoGyms.state})`,
 			areaSize: sql`values(${revoGyms.areaSize})`,
 			lastUpdated: sql`values(${revoGyms.lastUpdated})`,
+			active: sql`values(${revoGyms.active})`,
 			squatRacks: sql`values(${revoGyms.squatRacks})`,
 		};
 		await db.insert(revoGyms).values(info).onDuplicateKeyUpdate({ set: updateSet });
