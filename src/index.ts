@@ -112,10 +112,11 @@ app.get("/gyms/update", async (c) => {
 
 app.get("/gyms/stats/update", async (c) => {
   try {
-    const rawGymData = await parseHTML();
+    let rawGymData = await parseHTML();
     if (!isGymArray(rawGymData)) {
       return handleError(c, { message: "Data is not of type Gym[]" });
     }
+    rawGymData = await enrichGymData(rawGymData);
     await updateGymInfo(rawGymData);
     await insertGymStats(rawGymData);
 
