@@ -119,11 +119,53 @@ const checkAndRefreshCookies = async () => {
 // ---- Fetch helpers ----
 
 const SCRAPE_URL = "https://revocentral.revofitness.com.au/portal/club-counter.php";
+const NP_API = "https://revofitness.netpulse.com";
 
-const fetchWithToken = async (): Promise<{ $: cheerio.CheerioAPI; duration_ms: number } | { error: string; duration_ms: number } | null> => {
-	const token = process.env.SCRAPE_TOKEN;
-	if (!token) return null;
+const loginAndFetchToken = async (): Promise<string | null> => {
+	const email = process.env.SCRAPE_EMAIL;
+	const password = process.env.SCRAPE_PASSWORD;
+	if (!email || !password) return null;
 
+	try {
+		const loginRes = await fetch(`${NP_API}/np/exerciser/login`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/x-www-form-urlencoded; charset=utf-8",
+				"User-Agent": "RevoFitness/4.3 (com.netpulse.revofitness; build:404; iOS 26.2.0) Alamofire/5.9.1",
+				"X-NP-API-Version": "1.5",
+				Accept: "application/json,text/plain",
+			},
+			body: `password=${encodeURIComponent(password)}&username=${encodeURIComponent(email)}`,
+		});
+		if (!loginRes.ok) return null;
+
+		const jsessionId = loginRes.headers.get("set-cookie");
+		if (!jsessionId) return null;
+		const cookieMatch = jsessionId.match(/JSESSIONID=([^;]+)/);
+		if (!cookieMatch) return null;
+
+		const loginData: any = await loginRes.json();
+		const uuid = loginData.uuid;
+		if (!uuid) return null;
+
+		const tokenRes = await fetch(`${NP_API}/np/micro-web-app/v1.0/exercisers/${uuid}/tokens/BMA`, {
+			headers: {
+				Cookie: `JSESSIONID=${cookieMatch[1]}`,
+				"User-Agent": "RevoFitness/4.3 (com.netpulse.revofitness; build:404; iOS 26.2.0) Alamofire/5.9.1",
+				"X-NP-API-Version": "1.5",
+				Accept: "application/json,text/plain",
+			},
+		});
+		if (!tokenRes.ok) return null;
+
+		const tokenData: any = await tokenRes.json();
+		return tokenData.accessToken || null;
+	} catch {
+		return null;
+	}
+};
+
+const fetchClubCounterWithToken = async (token: string): Promise<{ $: cheerio.CheerioAPI; duration_ms: number } | { error: string; duration_ms: number }> => {
 	const url = `${SCRAPE_URL}?token=${token}`;
 	const startTime = Date.now();
 
@@ -180,27 +222,46 @@ const fetchPHPData = async (): Promise<{
 } | null> => {
 	const sessionStart = Date.now();
 
-	if (process.env.SCRAPE_TOKEN) {
-		console.log(`${STAGE.FETCH} Using SCRAPE_TOKEN for auth`);
-		const result = await fetchWithToken();
-		if (result && !("error" in result)) {
-			const clubCounts = extractClubCounts(result.$);
-			if (clubCounts.length > 0) {
-				currentSession = {
-					startedAt: nowIso(),
-					cookiesAvailable: 0,
-					cookieAttempts: [],
-					totalGymsFound: clubCounts.length,
-					missingGyms: 0,
-					totalKnownGyms: 0,
-					dbInserts: 0,
-					dbUpdates: 0,
-					duration_ms: 0,
-				};
-				return { $: result.$, clubCounts, session: currentSession };
+	const useLogin = process.env.SCRAPE_EMAIL && process.env.SCRAPE_PASSWORD;
+	const useToken = process.env.SCRAPE_TOKEN;
+
+	if (useLogin || useToken) {
+		let token: string | null = null;
+
+		if (useLogin) {
+			console.log(`${STAGE.FETCH} Logging in with SCRAPE_EMAIL...`);
+			token = await loginAndFetchToken();
+			if (token) {
+				console.log(`${STAGE.FETCH} ${STAGE.OK} Token obtained from login`);
+			} else if (useToken) {
+				console.log(`${STAGE.FETCH} ${STAGE.WARN} Login failed — using SCRAPE_TOKEN`);
+				token = useToken;
+			}
+		} else {
+			token = useToken;
+		}
+
+		if (token) {
+			const result = await fetchClubCounterWithToken(token);
+			if (!("error" in result)) {
+				const clubCounts = extractClubCounts(result.$);
+				if (clubCounts.length > 0) {
+					currentSession = {
+						startedAt: nowIso(),
+						cookiesAvailable: 0,
+						cookieAttempts: [],
+						totalGymsFound: clubCounts.length,
+						missingGyms: 0,
+						totalKnownGyms: 0,
+						dbInserts: 0,
+						dbUpdates: 0,
+						duration_ms: 0,
+					};
+					return { $: result.$, clubCounts, session: currentSession };
+				}
 			}
 		}
-		console.log(`${STAGE.FETCH} ${STAGE.WARN} Token failed — falling back to cookies`);
+		console.log(`${STAGE.FETCH} ${STAGE.WARN} Token auth failed — falling back to cookies`);
 	}
 
 	await checkAndRefreshCookies();
