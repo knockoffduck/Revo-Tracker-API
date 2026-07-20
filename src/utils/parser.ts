@@ -438,7 +438,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 				ratio: 0,
 				gymName: gym.name,
 				percentage: 0,
-				gymId: simpleIntegerHash(gym.name + gym.postcode.toString()).toString(),
+				gymId: gym.id,
 			});
 			inserts++;
 		}
