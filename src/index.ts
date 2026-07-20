@@ -52,9 +52,10 @@ app.use(
 app.route("/", admin);
 
 const callEveryFiveMinutes = () => {
-  const ENDPOINT = "https://revotrackerapi.dvcklab.com/gyms/stats/update"; // or your production URL
-  const TESTENDPOINT = "http://localhost:3001/gyms/stats/update";
-
+  const ENDPOINT = process.env.SCHEDULER_URL
+    || (process.env.NODE_ENV === "production"
+      ? "https://revotrackerapi.dvcklab.com/gyms/stats/update"
+      : "http://localhost:3001/gyms/stats/update");
 
   setInterval(
     async () => {
@@ -68,8 +69,7 @@ const callEveryFiveMinutes = () => {
       } catch (err) {
         console.error(`[Scheduler] Error:`, err);
       }
-    }, //20 seconds 
-    //20 * 1000,
+    },
     5 * 60 * 1000,
   ); // 5 minutes
 };
