@@ -118,12 +118,38 @@ const checkAndRefreshCookies = async () => {
 
 // ---- Fetch helpers ----
 
+const SCRAPE_URL = "https://revocentral.revofitness.com.au/portal/club-counter.php";
+
+const fetchWithToken = async (): Promise<{ $: cheerio.CheerioAPI; duration_ms: number } | { error: string; duration_ms: number } | null> => {
+	const token = process.env.SCRAPE_TOKEN;
+	if (!token) return null;
+
+	const url = `${SCRAPE_URL}?token=${token}`;
+	const startTime = Date.now();
+
+	try {
+		const response = await axiosGetWithProxyFallback<string>("Parser", url, {
+			headers: {
+				accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+				"user-agent":
+					"Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+			},
+			timeout: 15000,
+		});
+		const duration_ms = Date.now() - startTime;
+		return { $: cheerio.load(response.data), duration_ms };
+	} catch (e: any) {
+		const duration_ms = Date.now() - startTime;
+		return { error: e.message, duration_ms };
+	}
+};
+
 const fetchPHPDataWithCookie = async (
 	cookie: string,
 	cookieIndex: number,
 	retries = 2
 ): Promise<{ $: cheerio.CheerioAPI; duration_ms: number } | { error: string; duration_ms: number }> => {
-	const url = "https://revocentral.revofitness.com.au/portal/club-counter.php?id=10";
+	const url = `${SCRAPE_URL}?id=10`;
 	const startTime = Date.now();
 
 	try {
@@ -153,6 +179,30 @@ const fetchPHPData = async (): Promise<{
 	session: ScrapeSession;
 } | null> => {
 	const sessionStart = Date.now();
+
+	if (process.env.SCRAPE_TOKEN) {
+		console.log(`${STAGE.FETCH} Using SCRAPE_TOKEN for auth`);
+		const result = await fetchWithToken();
+		if (result && !("error" in result)) {
+			const clubCounts = extractClubCounts(result.$);
+			if (clubCounts.length > 0) {
+				currentSession = {
+					startedAt: nowIso(),
+					cookiesAvailable: 0,
+					cookieAttempts: [],
+					totalGymsFound: clubCounts.length,
+					missingGyms: 0,
+					totalKnownGyms: 0,
+					dbInserts: 0,
+					dbUpdates: 0,
+					duration_ms: 0,
+				};
+				return { $: result.$, clubCounts, session: currentSession };
+			}
+		}
+		console.log(`${STAGE.FETCH} ${STAGE.WARN} Token failed — falling back to cookies`);
+	}
+
 	await checkAndRefreshCookies();
 	const cookiesContent = await file("Scraper/cookies.json").text();
 	const cookies = JSON.parse(cookiesContent);

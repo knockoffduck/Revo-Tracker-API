@@ -142,6 +142,7 @@ function randomizeProfile(data: any) {
     data.memberType = "Member";
     data.isPaymentInProgress = false;
     data.isActive = true;
+    data.membershipLevel = 2;
 
     // 2. Randomize Identity
     data.firstName = firstNames[randomInt(0, firstNames.length - 1)];
