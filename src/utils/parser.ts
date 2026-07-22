@@ -1,11 +1,10 @@
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { file } from "bun";
-import { db } from "./database";
-import { revoGymCount, revoGyms } from "../db/schema";
+import { pb, ensureAdminAuth, toPbDate } from "./database";
+import { sqlDb } from "../db/database";
+import { revoGyms, revoGymCount } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
-import { sql, eq } from "drizzle-orm";
-import { v4 as uuidv4 } from "uuid";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
 import { sendAlert } from "./alerts";
@@ -366,33 +365,31 @@ const normalizeGymName = (name: string) => {
 		.toLowerCase();
 };
 
-const getGymMetadataScore = (gym: {
-	active?: number | null;
-	postcode?: number | null;
-	areaSize?: number | null;
-	address?: string | null;
-}) => {
+type PbGym = {
+	id: string;
+	name: string;
+	state: string;
+	area_size: number;
+	address: string;
+	postcode: number;
+	active: boolean;
+	timezone: string;
+	longitude?: number;
+	latitude?: number;
+	Squat_Racks?: number;
+};
+
+const getGymMetadataScore = (gym: PbGym) => {
 	let score = 0;
-	if ((gym.active ?? 0) > 0) score += 100;
+	if (gym.active) score += 100;
 	if ((gym.postcode ?? 0) > 0) score += 10;
-	if ((gym.areaSize ?? 0) > 0) score += 10;
+	if ((gym.area_size ?? 0) > 0) score += 10;
 	if (gym.address && gym.address !== "Pending Update") score += 10;
 	return score;
 };
 
-const buildGymsByNormalizedName = (
-	gyms: Array<{
-		id: string;
-		name: string;
-		address: string;
-		postcode: number;
-		state: string;
-		areaSize: number;
-		active: number;
-		squatRacks?: number;
-	}>
-) => {
-	const gymsByNormalizedName = new Map<string, (typeof gyms)[number]>();
+const buildGymsByNormalizedName = (gyms: PbGym[]) => {
+	const gymsByNormalizedName = new Map<string, PbGym>();
 	for (const gym of gyms) {
 		const normalizedName = normalizeGymName(gym.name);
 		const existingGym = gymsByNormalizedName.get(normalizedName);
@@ -409,6 +406,107 @@ const calculateGymRatios = (size: number, count: number) => {
 	const estimatedCapacity = size / 10;
 	const percentage = Math.min((count / estimatedCapacity) * 100, 100);
 	return { memberRatio, percentage };
+};
+
+// ---- MySQL dual-write helpers ----
+
+const insertGymStatsSql = async (
+	gymData: GymInfo[],
+	currentTime: string,
+	gymList: PbGym[],
+	missingGyms: PbGym[]
+) => {
+	if (!sqlDb) return;
+
+	try {
+		const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+		const rows = [];
+
+		for (const gym of gymData) {
+			const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
+			const canonicalName = existingGym?.name ?? gym.name;
+			const canonicalPostcode = existingGym?.postcode || gym.postcode;
+			const canonicalSize = existingGym?.area_size || gym.size;
+			const count = gym.member_count > 0 ? gym.member_count : 0;
+			const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
+			rows.push({
+				id: crypto.randomUUID(),
+				created: currentTime,
+				count,
+				ratio: memberRatio,
+				gymName: canonicalName,
+				percentage,
+				gymId: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
+			});
+		}
+
+		for (const gym of missingGyms) {
+			rows.push({
+				id: crypto.randomUUID(),
+				created: currentTime,
+				count: 0,
+				ratio: 0,
+				gymName: gym.name,
+				percentage: 0,
+				gymId: gym.id,
+			});
+		}
+
+		if (rows.length > 0) {
+			await sqlDb.insert(revoGymCount).values(rows);
+		}
+	} catch (err) {
+		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym stats write failed:`, err);
+	}
+};
+
+const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList: PbGym[]) => {
+	if (!sqlDb) return;
+
+	try {
+		const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+
+		for (const gym of gymData) {
+			const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
+			const postcode = gym.postcode || existingGym?.postcode || 0;
+			const gymId = existingGym?.id ?? simpleIntegerHash((existingGym?.name ?? gym.name) + postcode.toString()).toString();
+			const info = {
+				id: gymId,
+				name: existingGym?.name ?? gym.name,
+				address: gym.address !== "Pending Update" ? gym.address : (existingGym?.address ?? gym.address),
+				postcode,
+				state: gym.state !== "Unknown" ? gym.state : (existingGym?.state ?? gym.state),
+				areaSize: gym.size || existingGym?.area_size || 0,
+				lastUpdated: currentTime,
+				active: 1,
+				timezone: existingGym?.timezone ?? "Australia/Perth",
+				longitude: existingGym?.longitude ?? 0,
+				latitude: existingGym?.latitude ?? 0,
+				squatRacks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,
+			};
+
+			await sqlDb
+				.insert(revoGyms)
+				.values(info)
+				.onDuplicateKeyUpdate({
+					set: {
+						name: info.name,
+						address: info.address,
+						postcode: info.postcode,
+						state: info.state,
+						areaSize: info.areaSize,
+						lastUpdated: info.lastUpdated,
+						active: info.active,
+						timezone: info.timezone,
+						longitude: info.longitude,
+						latitude: info.latitude,
+						squatRacks: info.squatRacks,
+					},
+				});
+		}
+	} catch (err) {
+		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym info write failed:`, err);
+	}
 };
 
 const extractClubCounts = ($: cheerio.CheerioAPI) => {
@@ -458,7 +556,11 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const { $, clubCounts } = result;
 	const parseDuration = Date.now() - parseStart;
 
-	const existingGyms = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
+	await ensureAdminAuth();
+	const existingGyms = await pb.collection("Revo_Gyms").getFullList<PbGym>({
+		filter: "active=true",
+		batch: 200,
+	});
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
 
@@ -468,7 +570,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 		const metadata = gymsByNormalizedName.get(normalizeGymName(scrapedName));
 
 		if (metadata) {
-			const size = metadata.areaSize || 0;
+			const size = metadata.area_size || 0;
 			const count = memberCount > 0 ? memberCount : 0;
 			const { memberRatio, percentage } = calculateGymRatios(size, count);
 			gymData.push({
@@ -509,8 +611,12 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	console.log(`${STAGE.DB} ═══════════════════════════════════════════════════`);
 	console.log(`${STAGE.DB} PHASE 2: Database Write`);
 
-	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
-	const gymList = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
+	const currentTime = toPbDate(new Date());
+	await ensureAdminAuth();
+	const gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
+		filter: "active=true",
+		batch: 200,
+	});
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	let inserts = 0;
@@ -518,19 +624,17 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
 		const canonicalName = existingGym?.name ?? gym.name;
 		const canonicalPostcode = existingGym?.postcode || gym.postcode;
-		const canonicalSize = existingGym?.areaSize || gym.size;
+		const canonicalSize = existingGym?.area_size || gym.size;
 		const count = gym.member_count > 0 ? gym.member_count : 0;
 		const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
-		await db.insert(revoGymCount).values({
-			id: uuidv4(),
+		await pb.collection("Revo_Gym_Count").create({
 			created: currentTime,
 			count,
 			ratio: memberRatio,
-			gymName: canonicalName,
+			gym_name: canonicalName,
 			percentage,
-			gymId:
-				existingGym?.id ??
-				simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
+			gym_id: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
+			gym_id_rel: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
 		});
 		inserts++;
 	}
@@ -542,18 +646,20 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		console.log(`${STAGE.DB} ${STAGE.WARN} ${missingGyms.length} known gyms missing from scrape:`);
 		for (const gym of missingGyms) {
 			console.log(`${STAGE.DB}       - ${gym.name} (${gym.postcode})`);
-			await db.insert(revoGymCount).values({
-				id: uuidv4(),
+			await pb.collection("Revo_Gym_Count").create({
 				created: currentTime,
 				count: 0,
 				ratio: 0,
-				gymName: gym.name,
+				gym_name: gym.name,
 				percentage: 0,
-				gymId: gym.id,
+				gym_id: gym.id,
+				gym_id_rel: gym.id,
 			});
 			inserts++;
 		}
 	}
+
+	await insertGymStatsSql(gymData, currentTime, gymList, missingGyms);
 
 	// Persist session log
 	const logPath = "logs/updated_stats.json";
@@ -569,7 +675,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			name: g.name,
 			address: g.address || "Pending Update",
 			postcode: g.postcode || 0,
-			size: g.areaSize || 0,
+			size: g.area_size || 0,
 			state: g.state || "Unknown",
 			member_count: 0,
 			member_ratio: 0,
@@ -595,38 +701,52 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 };
 
 export const updateGymInfo = async (gymData: GymInfo[]) => {
-	const currentTime = new Date().toISOString().slice(0, 19).replace("T", " ");
-	const gymList = await db.select().from(revoGyms).where(eq(revoGyms.active, 1));
+	const currentTime = toPbDate(new Date());
+	await ensureAdminAuth();
+	const gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
+		filter: "active=true",
+		batch: 200,
+	});
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	let updates = 0;
 	for (const gym of gymData) {
 		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
 		const postcode = gym.postcode || existingGym?.postcode || 0;
+		const gymId = existingGym?.id ?? simpleIntegerHash((existingGym?.name ?? gym.name) + postcode.toString()).toString();
 		const info = {
-			id: existingGym?.id ?? simpleIntegerHash((existingGym?.name ?? gym.name) + postcode.toString()).toString(),
+			id: gymId,
 			name: existingGym?.name ?? gym.name,
 			address: gym.address !== "Pending Update" ? gym.address : (existingGym?.address ?? gym.address),
 			postcode,
 			state: gym.state !== "Unknown" ? gym.state : (existingGym?.state ?? gym.state),
-			areaSize: gym.size || existingGym?.areaSize || 0,
-			lastUpdated: currentTime,
-			active: 1 as number,
-			squatRacks: gym.squat_racks ?? existingGym?.squatRacks ?? 0,
+			area_size: gym.size || existingGym?.area_size || 0,
+			last_updated: currentTime,
+			active: true,
+			timezone: existingGym?.timezone ?? "Australia/Perth",
+			longitude: existingGym?.longitude ?? 0,
+			latitude: existingGym?.latitude ?? 0,
+			Squat_Racks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,
 		};
-		const updateSet: any = {
-			name: sql`values(${revoGyms.name})`,
-			address: sql`values(${revoGyms.address})`,
-			postcode: sql`values(${revoGyms.postcode})`,
-			state: sql`values(${revoGyms.state})`,
-			areaSize: sql`values(${revoGyms.areaSize})`,
-			lastUpdated: sql`values(${revoGyms.lastUpdated})`,
-			active: sql`values(${revoGyms.active})`,
-			squatRacks: sql`values(${revoGyms.squatRacks})`,
-		};
-		await db.insert(revoGyms).values(info).onDuplicateKeyUpdate({ set: updateSet });
-		updates++;
+
+		try {
+			await pb.collection("Revo_Gyms").update(gymId, info);
+			updates++;
+		} catch (err: any) {
+			if (err?.status === 404) {
+				try {
+					await pb.collection("Revo_Gyms").create(info);
+					updates++;
+				} catch (createErr) {
+					console.error(`${STAGE.DB} ${STAGE.FAIL} Failed to create gym ${info.name}:`, createErr);
+				}
+			} else {
+				console.error(`${STAGE.DB} ${STAGE.FAIL} Failed to update gym ${info.name}:`, err);
+			}
+		}
 	}
+
+	await updateGymInfoSql(gymData, currentTime, gymList);
 
 	console.log(`${STAGE.DB} ${STAGE.OK} Gym metadata updated: ${updates} rows`);
 };

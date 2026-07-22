@@ -7,9 +7,7 @@
 import { progressBus } from "./progress";
 import { parseHTML, updateGymInfo, insertGymStats } from "./parser";
 import { runTrendAgent, generateTrendsForGyms } from "../agents/trendAgent";
-import { db } from "./database";
-import { revoGymCount, revoGyms } from "../db/schema";
-import { desc, eq } from "drizzle-orm";
+import { pb, ensureAdminAuth } from "./database";
 
 const emit = (event: Parameters<typeof progressBus.emit>[0]) => progressBus.emit(event);
 
@@ -76,21 +74,22 @@ export async function streamingUpdateGyms() {
 
 export async function streamingLatestStats() {
 	emit({ type: "progress", phase: "fetching", percent: 50 });
-	const latestTime = await db
-		.select({ created: revoGymCount.created })
-		.from(revoGymCount)
-		.orderBy(desc(revoGymCount.created))
-		.limit(1);
-	if (!latestTime[0]) {
+	await ensureAdminAuth();
+	const latestPage = await pb.collection("Revo_Gym_Count").getList(1, 1, {
+		sort: "-created",
+	});
+	const latestTime = latestPage.items[0]?.created;
+	if (!latestTime) {
 		emit({ type: "error", message: "No stats in database" });
 		emit({ type: "done" });
 		return;
 	}
-	const data = await db
-		.select()
-		.from(revoGymCount)
-		.where(eq(revoGymCount.created, latestTime[0].created))
-		.orderBy(desc(revoGymCount.percentage));
+	const minutePrefix = latestTime.slice(0, 16);
+	const data = await pb.collection("Revo_Gym_Count").getFullList({
+		filter: `created>='${minutePrefix}:00' && created<='${minutePrefix}:59'`,
+		sort: "-percentage",
+		batch: 200,
+	});
 	emit({ type: "progress", phase: "fetching", percent: 100 });
 	emit({ type: "result", data: { success: true, message: "Latest", data: data as unknown } });
 	emit({ type: "done" });
@@ -100,9 +99,8 @@ export async function streamingTrendGenerate(lookbackDays: number) {
 	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Starting trend generation (lookback=${lookbackDays})` });
 	emit({ type: "progress", phase: "starting", percent: 0 });
 
-	const allGyms = await db
-		.select({ id: revoGyms.id, name: revoGyms.name })
-		.from(revoGyms);
+	await ensureAdminAuth();
+	const allGyms = await pb.collection("Revo_Gyms").getFullList({ batch: 200 });
 	const total = allGyms.length;
 	emit({ type: "log", level: "info", stage: "TrendAgent", message: `Found ${total} gyms to process` });
 

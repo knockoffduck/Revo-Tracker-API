@@ -4,7 +4,7 @@
 **Purpose:** Scrapes live member counts from Revo Fitness gyms, stores historical data, and exposes an API.
 **Runtime:** Bun (JavaScript/TypeScript)
 **Framework:** Hono (lightweight web API)
-**Database:** MySQL (Drizzle ORM)
+**Databases:** [PocketBase](https://pocketbase.io/) (primary) + optional MySQL (dual-write for legacy architecture)
 **Github:** `https://github.com/knockoffduck/Revo-Tracker-API`
 
 ---
@@ -19,12 +19,12 @@
     trendAgent.ts       # Pre-computes gym attendance trends (popular times)
     statAudit.ts        # Detects and repairs anomalous zero-occupancy readings
   db/
-    schema.ts           # ALL database tables (Drizzle ORM)
-    relations.ts        # Table relations
+    database.ts         # Optional MySQL Drizzle client
+    schema.ts           # MySQL Drizzle schema for Revo_Gyms, Revo_Gym_Count, gym_trend_cache
   utils/
-    parser.ts           # Core scraping — fetch, cookie cycling, parse, DB write
+    parser.ts           # Core scraping — fetch, cookie cycling, parse, dual DB write
     details.ts          # Scrapes individual gym pages for squat rack counts
-    database.ts         # MySQL connection via Drizzle
+    database.ts         # PocketBase admin client and helpers
     proxy.ts            # HTTP proxy with fallback logic (Webshare)
     tools.ts            # simpleIntegerHash() — deterministic gym ID from name+postcode
     handlers.ts         # API response helpers (handleSuccess / handleError)
@@ -44,16 +44,13 @@
   dropouts*.json        # statAudit repair reports
 /scripts
   repair-gym-dropouts.ts # CLI tool for running statAudit (see §6)
-/drizzle
-  meta/                 # Drizzle migration snapshots
 /tests
   *.test.ts             # Bun test suite (60 tests)
 /logs
   updated_stats.json     # Last 5 scrape sessions (rolling)
 /Dockerfile              # Multi-stage bun build — production deps only
 docker-compose.yml       # Single-service compose for local dev
-.env                     # DATABASE_URL, PROXY_*, etc.
-drizzle.config.ts        # Drizzle Kit config
+.env                     # POCKETBASE_*, PROXY_*, etc.
 package.json
 ```
 
@@ -61,42 +58,43 @@ package.json
 
 ## 2. Database Schema
 
-**Only the `revo*` tables are active.** The rest (`motherboards`, `bios_links`, `account`, etc.) are legacy.
+Data is stored in a PocketBase instance. The active collections are `Revo_Gyms`, `Revo_Gym_Count`, and `gym_trend_cache`. Legacy collections (`motherboards`, `bios_links`, `account`, `user`, etc.) are present from a prior import but are not used by the app.
 
 ### Revo_Gyms — Gym registry
-| Column | Type | Notes |
+| Field | Type | Notes |
 |--------|------|-------|
-| id | varchar(36) PK | Hash of name+postcode via `simpleIntegerHash()` |
+| id | text PK | Hash of name+postcode via `simpleIntegerHash()` |
 | name | text | Display name |
 | state | text | Australian state |
-| areaSize | int | Gym floor area in m^2 |
+| area_size | number | Gym floor area in m^2 |
 | address | text | Street address |
-| postcode | int | |
-| active | tinyint | 1 = active |
-| timezone | varchar(50) | IANA tz e.g. `Australia/Perth`, default Perth |
-| longitude/latitude | double | Optional geocoding |
-| squatRacks | tinyint | Scraped from gym detail page |
+| postcode | number | |
+| active | bool | true = active |
+| timezone | text | IANA tz e.g. `Australia/Perth`, default Perth |
+| longitude/latitude | number | Optional geocoding |
+| Squat_Racks | number | Scraped from gym detail page |
+| last_updated | date | |
 
 ### Revo_Gym_Count — Historical snapshots
-| Column | Type | Notes |
+| Field | Type | Notes |
 |--------|------|-------|
-| id | varchar(36) PK | UUID |
-| created | datetime | Snapshot timestamp |
-| count | int | Live member count at that time |
-| ratio | double | areaSize / count |
-| percentage | double | (count / estimatedCapacity) * 100, capped at 100 |
-| gymName | varchar(191) | Denormalized gym name |
-| gymId | varchar(36) FK | Links to Revo_Gyms |
-
-Indexes: `idx_revo_gym_count_created`, `idx_revogym_gym_created`, `idx_revogym_gym_created_desc`
+| id | text PK | UUID |
+| created | date | Snapshot timestamp |
+| count | number | Live member count at that time |
+| ratio | number | area_size / count |
+| percentage | number | (count / estimatedCapacity) * 100, capped at 100 |
+| gym_name | text | Denormalized gym name |
+| gym_id | text | Links to Revo_Gyms |
+| gym_id_rel | relation | Relation to Revo_Gyms |
 
 ### gym_trend_cache — Pre-computed trends (popular times)
-| Column | Type | Notes |
+| Field | Type | Notes |
 |--------|------|-------|
-| gymId | varchar(36) PK | |
-| dayOfWeek | int(0-6) PK | Sunday=0 |
-| trendData | json | Array of 96 slots: `{ time: "HH:MM", average, sampleCount }` |
-| updatedAt | timestamp | Auto-updated on upsert |
+| id | text PK | Auto-generated |
+| gym_id | text | |
+| day_of_week | number | 0-6, Sunday=0 |
+| trend_data | json | Array of 96 slots: `{ time: "HH:MM", average, sampleCount }` |
+| updated_at | date | |
 
 ---
 
@@ -217,12 +215,16 @@ Outputs:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | MySQL connection string |
+| `POCKETBASE_URL` | Yes | PocketBase instance URL e.g. `https://pb.dvcklab.work` |
+| `POCKETBASE_ADMIN_EMAIL` | Yes | PocketBase admin email for privileged writes |
+| `POCKETBASE_ADMIN_PASSWORD` | Yes | PocketBase admin password |
+| `DATABASE_URL` | No | MySQL URL for dual writes to the legacy DB (e.g. `mysql://user:pass@host:3306/db`). Omit to write only to PocketBase. |
 | `PROXY_USERNAME` | No | Webshare proxy username |
 | `PROXY_PASSWORD` | No | Webshare proxy password |
 | `DOMAIN_NAME` | No | Proxy host e.g. `p.webshare.io` |
 | `PROXY_PORT` | No | Proxy port, default 80 |
 | `PROXY_INSECURE_TLS` | No | Set to `1` to disable TLS cert verification for proxies |
+| `PORT` | No | Server port, default `3001` |
 
 ---
 
@@ -257,7 +259,7 @@ docker compose up -d
 
 **Dokploy:**
 - Push to GitHub — Dokploy pulls from the configured branch
-- Use Dokploy dashboard env panel for `DATABASE_URL`, `DOMAIN_NAME`, `PROXY_*` vars (not `.env`)
+- Use Dokploy dashboard env panel for `POCKETBASE_URL`, `POCKETBASE_ADMIN_EMAIL`, `POCKETBASE_ADMIN_PASSWORD`, `DOMAIN_NAME`, `PROXY_*` vars (not `.env`)
 - Dokploy injects env vars at container runtime — `env_file` directive in compose is ignored
 - Set build method: Dockerfile, port: 3001, health check path: `/`
 
@@ -285,7 +287,7 @@ docker compose up -d
 | Stat audit min score | 30 | statAudit.ts DEFAULT_MIN_SCORE |
 | Stat audit min trend avg | 20 | statAudit.ts DEFAULT_MIN_TREND_AVERAGE |
 | Stat audit min trend samples | 4 | statAudit.ts DEFAULT_MIN_TREND_SAMPLE_COUNT |
-| Estimated capacity divisor | 4 | parser.ts, statAudit.ts |
+| Estimated capacity divisor | 10 | parser.ts, statAudit.ts |
 | API server port | 3001 | index.ts |
 
 ---

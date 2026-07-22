@@ -1,36 +1,36 @@
 /**
  * Trend Agent - Calculates and caches gym attendance trends
- * 
+ *
  * This agent runs nightly to pre-calculate "Popular Times" data by:
  * 1. Fetching list of all gyms
  * 2. For each gym:
  *    a. Fetch historical data (last 90 days)
  *    b. Calculate trends (using gym's local timezone)
  *    c. Upsert results into gym_trend_cache
- * 
+ *
  * Optimization: Batch processing per gym to reduce memory usage and query load.
  */
 
-import { db } from "../utils/database";
-import { revoGymCount, revoGyms, gymTrendCache } from "../db/schema";
-import { gte, sql, eq, and, inArray } from "drizzle-orm";
+import { pb, ensureAdminAuth } from "../utils/database";
+import { sqlDb } from "../db/database";
+import { gymTrendCache } from "../db/schema";
 
 // Type definitions
 export interface TimeSlotAverage {
-    time: string; // Format: "HH:MM"
-    average: number;
-    sampleCount: number;
+	time: string; // Format: "HH:MM"
+	average: number;
+	sampleCount: number;
 }
 
 export interface DayTrendData {
-    dayOfWeek: number; // 0-6 (Sunday-Saturday)
-    slots: TimeSlotAverage[];
+	dayOfWeek: number; // 0-6 (Sunday-Saturday)
+	slots: TimeSlotAverage[];
 }
 
 export interface GymTrendResult {
-    gymId: string;
-    gymName: string;
-    trends: DayTrendData[];
+	gymId: string;
+	gymName: string;
+	trends: DayTrendData[];
 }
 
 // Configuration
@@ -41,165 +41,189 @@ const SLOT_DURATION_MINUTES = 15;
  * Generates all 15-minute time slot keys for a day
  */
 export const generateTimeSlots = (): string[] => {
-    const slots: string[] = [];
-    for (let hour = 0; hour < 24; hour++) {
-        for (let minute = 0; minute < 60; minute += SLOT_DURATION_MINUTES) {
-            const timeStr = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
-            slots.push(timeStr);
-        }
-    }
-    return slots;
+	const slots: string[] = [];
+	for (let hour = 0; hour < 24; hour++) {
+		for (let minute = 0; minute < 60; minute += SLOT_DURATION_MINUTES) {
+			const timeStr = `${hour.toString().padStart(2, "0")}:${minute.toString().padStart(2, "0")}`;
+			slots.push(timeStr);
+		}
+	}
+	return slots;
 };
 
 /**
  * Helper to get local time parts from a date string and timezone
  */
 export const getLocalTimeParts = (dateStr: string, timeZone: string) => {
-    const utcDate = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
+	const utcDate = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
 
-    const formatter = new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        weekday: "short",
-        hour: "numeric",
-        minute: "numeric",
-        hour12: false,
-    });
+	const formatter = new Intl.DateTimeFormat("en-US", {
+		timeZone,
+		weekday: "short",
+		hour: "numeric",
+		minute: "numeric",
+		hour12: false,
+	});
 
-    const parts = formatter.formatToParts(utcDate);
-    const partMap = new Map(parts.map((p) => [p.type, p.value]));
+	const parts = formatter.formatToParts(utcDate);
+	const partMap = new Map(parts.map((p) => [p.type, p.value]));
 
-    const weekdayMap: Record<string, number> = {
-        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-    };
+	const weekdayMap: Record<string, number> = {
+		Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+	};
 
-    const dayStr = partMap.get("weekday")!;
-    const hourStr = partMap.get("hour")!;
-    const minuteStr = partMap.get("minute")!;
+	const dayStr = partMap.get("weekday")!;
+	const hourStr = partMap.get("hour")!;
+	const minuteStr = partMap.get("minute")!;
 
-    const minuteNum = parseInt(minuteStr, 10);
-    const roundedMinute = Math.floor(minuteNum / SLOT_DURATION_MINUTES) * SLOT_DURATION_MINUTES;
+	const minuteNum = parseInt(minuteStr, 10);
+	const roundedMinute = Math.floor(minuteNum / SLOT_DURATION_MINUTES) * SLOT_DURATION_MINUTES;
 
-    return {
-        dayOfWeek: weekdayMap[dayStr],
-        timeSlot: `${hourStr.padStart(2, "0")}:${roundedMinute.toString().padStart(2, "0")}`,
-    };
+	return {
+		dayOfWeek: weekdayMap[dayStr],
+		timeSlot: `${hourStr.padStart(2, "0")}:${roundedMinute.toString().padStart(2, "0")}`,
+	};
 };
 
 /**
  * Fetches raw gym count records for a SINGLE gym
  */
 export const fetchGymData = async (gymId: string, lookbackDays: number = DEFAULT_LOOKBACK_DAYS) => {
-    const lookbackDate = new Date();
-    lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
+	const lookbackDate = new Date();
+	lookbackDate.setDate(lookbackDate.getDate() - lookbackDays);
+	const lookbackIso = lookbackDate.toISOString();
 
-    // Select minimal columns
-    const records = await db
-        .select({
-            created: revoGymCount.created,
-            count: revoGymCount.count,
-        })
-        .from(revoGymCount)
-        .where(and(
-            eq(revoGymCount.gymId, gymId),
-            gte(revoGymCount.created, lookbackDate.toISOString().slice(0, 19).replace("T", " "))
-        ));
+	await ensureAdminAuth();
+	const records = await pb.collection("Revo_Gym_Count").getFullList<{
+		created: string;
+		count: number;
+	}>({
+		filter: `gym_id='${gymId}' && created>='${lookbackIso}'`,
+		sort: "created",
+		batch: 500,
+	});
 
-    return records;
+	return records;
 };
 
 /**
  * Calculates trends for a single gym given its records and timezone
  */
 export const calculateTrends = (
-    records: Array<{ created: string; count: number }>,
-    timezone: string
+	records: Array<{ created: string; count: number }>,
+	timezone: string
 ): Map<number, Map<string, { sum: number; count: number }>> => {
-    // Map: dayOfWeek → timeSlot → { sum, count }
-    const dayMap = new Map<number, Map<string, { sum: number; count: number }>>();
+	// Map: dayOfWeek → timeSlot → { sum, count }
+	const dayMap = new Map<number, Map<string, { sum: number; count: number }>>();
 
-    for (const record of records) {
-        // Skip zero/negative counts so trend averages only reflect periods when the gym
-        // was actually open and reporting members (0 usually means closed or missing data).
-        if (record.count <= 0) {
-            continue;
-        }
+	for (const record of records) {
+		// Skip zero/negative counts so trend averages only reflect periods when the gym
+		// was actually open and reporting members (0 usually means closed or missing data).
+		if (record.count <= 0) {
+			continue;
+		}
 
-        try {
-            const { dayOfWeek, timeSlot } = getLocalTimeParts(record.created, timezone);
+		try {
+			const { dayOfWeek, timeSlot } = getLocalTimeParts(record.created, timezone);
 
-            if (!dayMap.has(dayOfWeek)) {
-                dayMap.set(dayOfWeek, new Map());
-            }
-            const slotMap = dayMap.get(dayOfWeek)!;
+			if (!dayMap.has(dayOfWeek)) {
+				dayMap.set(dayOfWeek, new Map());
+			}
+			const slotMap = dayMap.get(dayOfWeek)!;
 
-            if (!slotMap.has(timeSlot)) {
-                slotMap.set(timeSlot, { sum: 0, count: 0 });
-            }
-            const slotData = slotMap.get(timeSlot)!;
+			if (!slotMap.has(timeSlot)) {
+				slotMap.set(timeSlot, { sum: 0, count: 0 });
+			}
+			const slotData = slotMap.get(timeSlot)!;
 
-            slotData.sum += record.count;
-            slotData.count += 1;
-        } catch (error) {
-            continue;
-        }
-    }
+			slotData.sum += record.count;
+			slotData.count += 1;
+		} catch (error) {
+			continue;
+		}
+	}
 
-    return dayMap;
+	return dayMap;
 };
 
 /**
  * Formats trend data for a specific gym and day into the JSON structure for storage
  */
 export const formatTrendDataForDay = (
-    dayMap: Map<string, { sum: number; count: number }> | undefined
+	dayMap: Map<string, { sum: number; count: number }> | undefined
 ): TimeSlotAverage[] => {
-    const allSlots = generateTimeSlots();
-    const result: TimeSlotAverage[] = [];
+	const allSlots = generateTimeSlots();
+	const result: TimeSlotAverage[] = [];
 
-    for (const slot of allSlots) {
-        const data = dayMap?.get(slot);
-        if (data && data.count > 0) {
-            result.push({
-                time: slot,
-                average: Math.round(data.sum / data.count),
-                sampleCount: data.count,
-            });
-        } else {
-            result.push({
-                time: slot,
-                average: 0,
-                sampleCount: 0,
-            });
-        }
-    }
+	for (const slot of allSlots) {
+		const data = dayMap?.get(slot);
+		if (data && data.count > 0) {
+			result.push({
+				time: slot,
+				average: Math.round(data.sum / data.count),
+				sampleCount: data.count,
+			});
+		} else {
+			result.push({
+				time: slot,
+				average: 0,
+				sampleCount: 0,
+			});
+		}
+	}
 
-    return result;
+	return result;
 };
 
 /**
  * Upserts trend data for a gym/day combination into the cache table
  */
 export const upsertTrendCache = async (
-    gymId: string,
-    dayOfWeek: number,
-    trendData: TimeSlotAverage[]
+	gymId: string,
+	dayOfWeek: number,
+	trendData: TimeSlotAverage[]
 ): Promise<void> => {
-    const now = new Date();
+	const now = new Date();
+	const updatedAt = now.toISOString();
 
-    await db
-        .insert(gymTrendCache)
-        .values({
-            gymId,
-            dayOfWeek,
-            trendData: trendData,
-            updatedAt: now.toISOString().slice(0, 19).replace("T", " "),
-        })
-        .onDuplicateKeyUpdate({
-            set: {
-                trendData: sql`VALUES(${gymTrendCache.trendData})`,
-                updatedAt: sql`VALUES(${gymTrendCache.updatedAt})`,
-            },
-        });
+	await ensureAdminAuth();
+	const existing = await pb.collection("gym_trend_cache").getList(1, 1, {
+		filter: `gym_id='${gymId}' && day_of_week=${dayOfWeek}`,
+	});
+
+	const payload = {
+		gym_id: gymId,
+		day_of_week: dayOfWeek,
+		trend_data: trendData,
+		updated_at: updatedAt,
+	};
+
+	if (existing.items.length > 0) {
+		await pb.collection("gym_trend_cache").update(existing.items[0].id, payload);
+	} else {
+		await pb.collection("gym_trend_cache").create(payload);
+	}
+
+	if (sqlDb) {
+		try {
+			await sqlDb
+				.insert(gymTrendCache)
+				.values({
+					gymId,
+					dayOfWeek,
+					trendData,
+					updatedAt,
+				})
+				.onDuplicateKeyUpdate({
+					set: {
+						trendData,
+						updatedAt,
+					},
+				});
+		} catch (err) {
+			console.error(`[TrendAgent] MySQL trend cache write failed for ${gymId}/${dayOfWeek}:`, err);
+		}
+	}
 };
 
 type GymInfo = { id: string; name: string; timezone: string };
@@ -208,30 +232,30 @@ type GymInfo = { id: string; name: string; timezone: string };
  * Processes trend data for a single gym and upserts all 7 days into the cache.
  */
 export const processGymTrends = async (
-    gym: GymInfo,
-    lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
+	gym: GymInfo,
+	lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
 ): Promise<{ success: true } | { success: false; error: string }> => {
-    try {
-        const records = await fetchGymData(gym.id, lookbackDays);
+	try {
+		const records = await fetchGymData(gym.id, lookbackDays);
 
-        if (records.length === 0) {
-            return { success: false, error: `No data for ${gym.name} (${gym.id})` };
-        }
+		if (records.length === 0) {
+			return { success: false, error: `No data for ${gym.name} (${gym.id})` };
+		}
 
-        const dayTrends = calculateTrends(records, gym.timezone);
+		const dayTrends = calculateTrends(records, gym.timezone);
 
-        for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
-            const dayData = dayTrends.get(dayOfWeek);
-            const formattedData = formatTrendDataForDay(dayData);
-            await upsertTrendCache(gym.id, dayOfWeek, formattedData);
-        }
+		for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+			const dayData = dayTrends.get(dayOfWeek);
+			const formattedData = formatTrendDataForDay(dayData);
+			await upsertTrendCache(gym.id, dayOfWeek, formattedData);
+		}
 
-        return { success: true };
-    } catch (err) {
-        const error = `Failed processing gym ${gym.name} (${gym.id}): ${err}`;
-        console.error(`[TrendAgent] ${error}`);
-        return { success: false, error };
-    }
+		return { success: true };
+	} catch (err) {
+		const error = `Failed processing gym ${gym.name} (${gym.id}): ${err}`;
+		console.error(`[TrendAgent] ${error}`);
+		return { success: false, error };
+	}
 };
 
 /**
@@ -239,121 +263,136 @@ export const processGymTrends = async (
  * Missing/invalid IDs are reported in the errors array but don't stop processing.
  */
 export const generateTrendsForGyms = async (
-    gymIds: string | string[],
-    lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
+	gymIds: string | string[],
+	lookbackDays: number = DEFAULT_LOOKBACK_DAYS,
 ): Promise<{ success: boolean; gymsProcessed: number; errors: string[] }> => {
-    const ids = Array.isArray(gymIds) ? gymIds : [gymIds];
-    const errors: string[] = [];
-    let gymsProcessed = 0;
+	const ids = Array.isArray(gymIds) ? gymIds : [gymIds];
+	const errors: string[] = [];
+	let gymsProcessed = 0;
 
-    if (ids.length === 0) {
-        return { success: true, gymsProcessed: 0, errors: [] };
-    }
+	if (ids.length === 0) {
+		return { success: true, gymsProcessed: 0, errors: [] };
+	}
 
-    console.log(`[TrendAgent] Generating trends for ${ids.length} gym(s) with ${lookbackDays}-day lookback...`);
+	console.log(`[TrendAgent] Generating trends for ${ids.length} gym(s) with ${lookbackDays}-day lookback...`);
 
-    try {
-        const gyms = await db
-            .select({ id: revoGyms.id, name: revoGyms.name, timezone: revoGyms.timezone })
-            .from(revoGyms)
-            .where(inArray(revoGyms.id, ids));
+	try {
+		await ensureAdminAuth();
+		const filter = ids.map((id) => `id='${id}'`).join(" || ");
+		const gyms = await pb.collection("Revo_Gyms").getFullList<GymInfo>({
+			filter,
+			batch: 200,
+		});
 
-        const foundIds = new Set(gyms.map((g) => g.id));
-        for (const id of ids) {
-            if (!foundIds.has(id)) {
-                errors.push(`Gym not found: ${id}`);
-            }
-        }
+		const foundIds = new Set(gyms.map((g) => g.id));
+		for (const id of ids) {
+			if (!foundIds.has(id)) {
+				errors.push(`Gym not found: ${id}`);
+			}
+		}
 
-        for (let i = 0; i < gyms.length; i++) {
-            const gym = gyms[i];
-            gymsProcessed++;
-            console.log(`[TrendAgent] Processing ${i + 1}/${gyms.length}: ${gym.name} (${gym.id})`);
+		for (let i = 0; i < gyms.length; i++) {
+			const gym = gyms[i];
+			gymsProcessed++;
+			console.log(`[TrendAgent] Processing ${i + 1}/${gyms.length}: ${gym.name} (${gym.id})`);
 
-            const result = await processGymTrends(gym, lookbackDays);
-            if (!result.success) {
-                errors.push(result.error);
-            }
-        }
+			const result = await processGymTrends(gym, lookbackDays);
+			if (!result.success) {
+				errors.push(result.error);
+			}
+		}
 
-        console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gym(s).`);
-        return { success: errors.length === 0, gymsProcessed, errors };
-    } catch (error) {
-        console.error("[TrendAgent] Fatal error:", error);
-        return { success: false, gymsProcessed, errors: [String(error)] };
-    }
+		console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gym(s).`);
+		return { success: errors.length === 0, gymsProcessed, errors };
+	} catch (error) {
+		console.error("[TrendAgent] Fatal error:", error);
+		return { success: false, gymsProcessed, errors: [String(error)] };
+	}
 };
 
 /**
  * Main agent function
  */
 export const runTrendAgent = async (
-    lookbackDays: number = DEFAULT_LOOKBACK_DAYS
+	lookbackDays: number = DEFAULT_LOOKBACK_DAYS
 ): Promise<{ success: boolean; gymsProcessed: number; errors: string[] }> => {
-    console.log(`[TrendAgent] Starting optimized trend calculation with ${lookbackDays}-day lookback...`);
+	console.log(`[TrendAgent] Starting optimized trend calculation with ${lookbackDays}-day lookback...`);
 
-    const errors: string[] = [];
-    let gymsProcessed = 0;
+	const errors: string[] = [];
+	let gymsProcessed = 0;
 
-    try {
-        // Step 1: Fetch list of all gyms
-        const allGyms = await db
-            .select({ id: revoGyms.id, name: revoGyms.name, timezone: revoGyms.timezone })
-            .from(revoGyms);
+	try {
+		// Step 1: Fetch list of all gyms
+		await ensureAdminAuth();
+		const allGyms = await pb.collection("Revo_Gyms").getFullList<GymInfo>({
+			batch: 200,
+		});
 
-        console.log(`[TrendAgent] Found ${allGyms.length} gyms to process.`);
+		console.log(`[TrendAgent] Found ${allGyms.length} gyms to process.`);
 
-        // Step 2: Iterate and process each gym
-        for (const gym of allGyms) {
-            gymsProcessed++;
-            console.log(`[TrendAgent] Processing ${gymsProcessed}/${allGyms.length}: ${gym.name} (${gym.id})`);
+		// Step 2: Iterate and process each gym
+		for (const gym of allGyms) {
+			gymsProcessed++;
+			console.log(`[TrendAgent] Processing ${gymsProcessed}/${allGyms.length}: ${gym.name} (${gym.id})`);
 
-            const result = await processGymTrends(gym, lookbackDays);
-            if (!result.success) {
-                errors.push(result.error);
-            }
-        }
+			const result = await processGymTrends(gym, lookbackDays);
+			if (!result.success) {
+				errors.push(result.error);
+			}
+		}
 
-        console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gyms.`);
-        return { success: errors.length === 0, gymsProcessed, errors };
-    } catch (error) {
-        console.error("[TrendAgent] Fatal error:", error);
-        return { success: false, gymsProcessed, errors: [String(error)] };
-    }
+		console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gyms.`);
+		return { success: errors.length === 0, gymsProcessed, errors };
+	} catch (error) {
+		console.error("[TrendAgent] Fatal error:", error);
+		return { success: false, gymsProcessed, errors: [String(error)] };
+	}
 };
 
 /**
  * Retrieves cached trend data for a specific gym
  */
 export const getGymTrends = async (gymId: string): Promise<DayTrendData[]> => {
-    const rows = await db
-        .select()
-        .from(gymTrendCache)
-        .where(sql`${gymTrendCache.gymId} = ${gymId}`);
+	await ensureAdminAuth();
+	const rows = await pb.collection("gym_trend_cache").getFullList<{
+		gym_id: string;
+		day_of_week: number;
+		trend_data: unknown;
+	}>({
+		filter: `gym_id='${gymId}'`,
+		batch: 50,
+	});
 
-    return rows.map((row) => ({
-        dayOfWeek: row.dayOfWeek,
-        slots: row.trendData as TimeSlotAverage[],
-    }));
+	return rows.map((row) => ({
+		dayOfWeek: row.day_of_week,
+		slots: row.trend_data as TimeSlotAverage[],
+	}));
 };
 
 /**
  * Retrieves cached trend data for all gyms
  */
 export const getAllGymTrends = async (): Promise<Map<string, DayTrendData[]>> => {
-    const rows = await db.select().from(gymTrendCache);
+	await ensureAdminAuth();
+	const rows = await pb.collection("gym_trend_cache").getFullList<{
+		gym_id: string;
+		day_of_week: number;
+		trend_data: unknown;
+	}>({
+		batch: 500,
+	});
 
-    const resultMap = new Map<string, DayTrendData[]>();
+	const resultMap = new Map<string, DayTrendData[]>();
 
-    for (const row of rows) {
-        if (!resultMap.has(row.gymId)) {
-            resultMap.set(row.gymId, []);
-        }
-        resultMap.get(row.gymId)!.push({
-            dayOfWeek: row.dayOfWeek,
-            slots: row.trendData as TimeSlotAverage[],
-        });
-    }
+	for (const row of rows) {
+		if (!resultMap.has(row.gym_id)) {
+			resultMap.set(row.gym_id, []);
+		}
+		resultMap.get(row.gym_id)!.push({
+			dayOfWeek: row.day_of_week,
+			slots: row.trend_data as TimeSlotAverage[],
+		});
+	}
 
-    return resultMap;
+	return resultMap;
 };

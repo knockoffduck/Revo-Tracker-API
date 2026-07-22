@@ -4,12 +4,52 @@ import { handleError, handleSuccess } from "./utils/handlers";
 import { insertGymStats, parseHTML, updateGymInfo } from "./utils/parser";
 import { GymInfo } from "./utils/types";
 import { enrichGymData } from "./utils/details";
-import { db } from "./utils/database";
-import { revoGymCount } from "./db/schema";
-import { desc, eq } from "drizzle-orm";
+import { pb, ensureAdminAuth } from "./utils/database";
 import admin from "./admin";
 
 const app = new Hono();
+
+// ── Rate limiter ───────────────────────────────────────────────────────────
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX = 60; // requests per window per IP
+
+function getClientIp(c: { req: { header: (name: string) => string | undefined } }) {
+  const forwardedFor = c.req.header("x-forwarded-for");
+  const realIp = c.req.header("x-real-ip");
+  if (forwardedFor) {
+    return forwardedFor.split(",")[0]?.trim() ?? "unknown";
+  }
+  return realIp?.trim() ?? "unknown";
+}
+
+app.use("*", async (c, next) => {
+  // Skip rate limiting for the scheduler's internal scrape endpoint
+  const path = c.req.path;
+  if (path === "/gyms/stats/update" || path === "/gyms/update") {
+    return next();
+  }
+
+  const ip = getClientIp(c);
+  const now = Date.now();
+  const current = rateLimitStore.get(ip);
+
+  if (!current || current.resetAt <= now) {
+    rateLimitStore.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return next();
+  }
+
+  if (current.count >= RATE_LIMIT_MAX) {
+    const retryAfter = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    return c.json({ error: "Too many requests" }, 429, {
+      "Retry-After": String(retryAfter),
+    });
+  }
+
+  current.count += 1;
+  rateLimitStore.set(ip, current);
+  return next();
+});
 
 // CORS — allow the Next.js dev server (and any localhost/private-IP origin)
 // to call this API. In production, set CORS_ORIGINS to the frontend domain(s).
@@ -129,22 +169,23 @@ app.get("/gyms/stats/update", async (c) => {
 
 app.get("/gyms/stats/latest", async (c) => {
   try {
-    const latestTime = await db
-      .select({ created: revoGymCount.created })
-      .from(revoGymCount)
-      .orderBy(desc(revoGymCount.created))
-      .limit(1);
+    await ensureAdminAuth();
+    const latestPage = await pb.collection("Revo_Gym_Count").getList(1, 1, {
+      sort: "-created",
+    });
+    const latestTime = latestPage.items[0]?.created;
     if (!latestTime) {
       return handleError(c, {
         message: "Could not get latestTime in database",
       });
     }
 
-    const latestData = await db
-      .select()
-      .from(revoGymCount)
-      .where(eq(revoGymCount.created, latestTime[0].created))
-      .orderBy(desc(revoGymCount.percentage));
+    const minutePrefix = latestTime.slice(0, 16);
+    const latestData = await pb.collection("Revo_Gym_Count").getFullList({
+      filter: `created>='${minutePrefix}:00' && created<='${minutePrefix}:59'`,
+      sort: "-percentage",
+      batch: 200,
+    });
 
     return handleSuccess(c, latestData);
   } catch (error) {
@@ -231,38 +272,12 @@ app.get("/gyms/trends", async (c) => {
   }
 });
 
-// app.get("/test", async (c) => {
-// 	const gymData = await parseHTML();
-// 	if (!gymData) return "error fetching gymdata";
-// 	gymData.pop();
-// 	const supabase = supabaseClient();
-// 	if (!supabase) return "Cannot access Supabase";
-// 	const jsonFile = Bun.file("src/utils/gyms.json");
-// 	const GYMS: { name: string; size: number }[] = await jsonFile.json();
-
-// 	for (let i = 0; i < GYMS.length; i++) {
-// 		const currentGym = GYMS[i];
-// 		const exists = gymData.some((gym) => gym.name === currentGym.name);
-// 		if (!exists) {
-// 			console.log(`Gym ${currentGym.name} has 0 members`);
-// 			gymData.push({
-// 				name: currentGym.name,
-// 				size: currentGym.size,
-// 				member_count: 0,
-// 				member_ratio: 0,
-// 				percentage: 0,
-// 			});
-// 		}
-// 	}
-// 	return handleSuccess(c, gymData);
-// });
-
 if (import.meta.main) {
   callEveryFiveMinutes();
 }
 
 export default {
-  port: 3001,
+  port: Number(process.env.PORT ?? 3001),
   fetch: app.fetch,
   idleTimeout: 60 // 5 minutes (default is 30s in Bun, Hono might be interfering or client side timeout, but user said "bun.server has timed out")
 };
