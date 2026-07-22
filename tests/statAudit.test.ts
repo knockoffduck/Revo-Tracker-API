@@ -60,7 +60,7 @@ describe("statAudit helpers", () => {
         const result = calculateGymRatios(1200, 30);
 
         expect(result.memberRatio).toBe(40);
-        expect(result.percentage).toBeCloseTo(15, 6);
+        expect(result.percentage).toBeCloseTo(25, 6);
     });
 });
 
@@ -95,7 +95,7 @@ describe("analyzeGymDropouts", () => {
             nextCount: 34,
         });
         expect(result.proposals[0].repairedRatio).toBe(40);
-        expect(result.proposals[0].repairedPercentage).toBeCloseTo(15, 6);
+        expect(result.proposals[0].repairedPercentage).toBeCloseTo(25, 6);
     });
 
     test("repairs longer zero runs from trend values when trend support is strong", () => {

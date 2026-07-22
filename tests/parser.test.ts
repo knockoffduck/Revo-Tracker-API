@@ -21,33 +21,34 @@ mock.module("axios", () => {
     };
 });
 
-// Mock Database
-mock.module("../src/utils/database", () => {
-    const mockDb = {
-        select: mock(() => mockDb),
-        from: mock(() => mockDb),
-        where: mock(() => mockDb),
-        orderBy: mock(() => mockDb),
-        limit: mock(() => mockDb),
-        insert: mock(() => mockDb),
-        values: mock(() => mockDb),
-        onDuplicateKeyUpdate: mock(() => mockDb),
-        // Handle database results for revoGyms
-        then: (resolve: any) => {
-            // Check if we are selecting from revoGyms (simplified)
-            resolve([
-                { name: "Perth City", address: "123 Hay St, Perth", postcode: 6000, state: "WA", areaSize: 1500, active: 1 },
-                { name: "Scarborough", address: "555 Coast Rd, Scarborough", postcode: 6019, state: "WA", areaSize: 2000, active: 1 },
-                { name: "Claremont", address: "10 Bay View Tce, Claremont", postcode: 6010, state: "WA", areaSize: 1000, active: 1 },
-                { name: "OConnor", address: "5 Stockdale Rd, O’Connor", postcode: 6163, state: "WA", areaSize: 1480, active: 1 },
-                { name: "O'Connor", address: "Pending Update", postcode: 0, state: "Unknown", areaSize: 0, active: 0 }
-            ]);
-        }
-    };
-    return {
-        db: mockDb
-    };
+// Mock MySQL client so dual writes are skipped in these tests.
+mock.module("../src/db/database", () => ({
+    sqlDb: null,
+}));
+
+const mockGyms = [
+    { id: "perth-city", name: "Perth City", address: "123 Hay St, Perth", postcode: 6000, state: "WA", area_size: 1500, active: true, timezone: "Australia/Perth" },
+    { id: "scarborough", name: "Scarborough", address: "555 Coast Rd, Scarborough", postcode: 6019, state: "WA", area_size: 2000, active: true, timezone: "Australia/Perth" },
+    { id: "claremont", name: "Claremont", address: "10 Bay View Tce, Claremont", postcode: 6010, state: "WA", area_size: 1000, active: true, timezone: "Australia/Perth" },
+    { id: "oconnor", name: "OConnor", address: "5 Stockdale Rd, O’Connor", postcode: 6163, state: "WA", area_size: 1480, active: true, timezone: "Australia/Perth" },
+];
+
+const createPbCollection = () => ({
+    getFullList: mock(async () => mockGyms),
+    getList: mock(async () => ({ items: [] })),
+    create: mock(async () => ({})),
+    update: mock(async () => ({})),
 });
+
+// Mock PocketBase client
+mock.module("../src/utils/database", () => ({
+    pb: {
+        collection: mock(() => createPbCollection()),
+        authStore: { isValid: true },
+    },
+    ensureAdminAuth: mock(async () => {}),
+    toPbDate: mock((d: Date) => d.toISOString()),
+}));
 
 describe("Parser tests", () => {
     test("parseHTML should correctly extract gym data from mock HTML", async () => {

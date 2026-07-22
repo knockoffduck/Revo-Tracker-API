@@ -1,9 +1,9 @@
 [
   {
-    "timestamp": "2026-03-21 14:25:30",
+    "timestamp": "2026-07-22T16:33:50.466Z",
     "gymCount": 1,
     "missingGyms": 0,
-    "totalGyms": 1,
+    "totalKnownGyms": 1,
     "data": [
       {
         "name": "Mock Gym",
@@ -13,33 +13,16 @@
         "state": "WA",
         "member_count": 50,
         "member_ratio": 10,
-        "percentage": 60.00000000000001
+        "percentage": 100,
+        "squat_racks": 5
       }
     ]
   },
   {
-    "timestamp": "2026-03-21 14:25:30",
-    "gymCount": 1,
-    "missingGyms": 0,
-    "totalGyms": 2,
-    "data": [
-      {
-        "name": "O'Connor",
-        "address": "Pending Update",
-        "postcode": 0,
-        "state": "Unknown",
-        "size": 0,
-        "member_count": 20,
-        "member_ratio": 0,
-        "percentage": 0
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-03-21 14:25:30",
+    "timestamp": "2026-07-22T16:33:47.181Z",
     "gymCount": 1,
     "missingGyms": 1,
-    "totalGyms": 1,
+    "totalKnownGyms": 2,
     "data": [
       {
         "name": "Test Gym",
@@ -52,10 +35,10 @@
         "percentage": 50
       },
       {
-        "name": "Missing Gym",
-        "address": "Pending Update",
+        "name": "Other Gym",
+        "address": "456 Other St",
         "postcode": 6001,
-        "size": 0,
+        "size": 800,
         "state": "WA",
         "member_count": 0,
         "member_ratio": 0,
@@ -64,28 +47,29 @@
     ]
   },
   {
-    "timestamp": "2026-03-15 15:42:05",
+    "timestamp": "2026-07-22T16:32:28.824Z",
     "gymCount": 1,
     "missingGyms": 0,
-    "totalGyms": 2,
+    "totalKnownGyms": 1,
     "data": [
       {
-        "name": "O'Connor",
-        "address": "Pending Update",
-        "postcode": 0,
-        "state": "Unknown",
-        "size": 0,
-        "member_count": 20,
-        "member_ratio": 0,
-        "percentage": 0
+        "name": "Mock Gym",
+        "address": "123 Mock St",
+        "postcode": 1234,
+        "size": 500,
+        "state": "WA",
+        "member_count": 50,
+        "member_ratio": 10,
+        "percentage": 100,
+        "squat_racks": 5
       }
     ]
   },
   {
-    "timestamp": "2026-03-15 15:42:05",
+    "timestamp": "2026-07-22T16:32:25.051Z",
     "gymCount": 1,
     "missingGyms": 1,
-    "totalGyms": 1,
+    "totalKnownGyms": 2,
     "data": [
       {
         "name": "Test Gym",
@@ -98,14 +82,33 @@
         "percentage": 50
       },
       {
-        "name": "Missing Gym",
-        "address": "Pending Update",
+        "name": "Other Gym",
+        "address": "456 Other St",
         "postcode": 6001,
-        "size": 0,
+        "size": 800,
         "state": "WA",
         "member_count": 0,
         "member_ratio": 0,
         "percentage": 0
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-07-22T16:31:50.111Z",
+    "gymCount": 1,
+    "missingGyms": 0,
+    "totalKnownGyms": 1,
+    "data": [
+      {
+        "name": "Mock Gym",
+        "address": "123 Mock St",
+        "postcode": 1234,
+        "size": 500,
+        "state": "WA",
+        "member_count": 50,
+        "member_ratio": 10,
+        "percentage": 100,
+        "squat_racks": 5
       }
     ]
   }

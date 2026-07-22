@@ -1,52 +1,68 @@
 import { describe, expect, test, mock, beforeEach } from "bun:test";
 import app from "../src/index";
 
-// Track mock responses for trend agent tests
-let trendCacheResponse: any[] = [];
+// Mock MySQL client so dual writes are skipped in these tests.
+mock.module("../src/db/database", () => ({
+    sqlDb: null,
+}));
 
-// Mock Database
-// This is complex because of chaining.
-// db.select().from().orderBy().limit()
+// Mock PocketBase client
 mock.module("../src/utils/database", () => {
-    const mockDb = {
-        select: mock(() => mockDb),
-        from: mock(() => mockDb),
-        where: mock(() => mockDb),
-        orderBy: mock(() => mockDb),
-        limit: mock(() => mockDb),
-        insert: mock(() => mockDb), // Added insert for update endpoints
-        values: mock(() => mockDb), // Added values
-        onDuplicateKeyUpdate: mock(() => mockDb), // Added for updateGymInfo
-        innerJoin: mock(() => mockDb),
-        // When awaiting the query, it returns the result. 
-        // In Bun/JS, awaiting an object calls .then() if it exists.
-        // Or Drizzle objects are awaitable promises.
-        then: (resolve: any) => {
-            // Return trend cache data if querying gymTrendCache
-            if (trendCacheResponse.length > 0) {
-                return resolve(trendCacheResponse);
-            }
-            // Return mock data that satisfies both revoGyms and revoGymCount queries to avoid complex mocking logic
-            return resolve([
-                { 
-                    created: new Date().toISOString(), 
-                    count: 100, 
-                    ratio: 5, 
-                    percentage: 50, 
-                    gymName: "Mock Gym",
-                    // Fields for revoGyms
-                    name: "Mock Gym",
-                    postcode: 1234,
-                    address: "123 Mock St",
-                    state: "WA",
-                    areaSize: 500,
-                    active: 1
-                }
-            ]);
-        }
+    const mockGyms = [
+        {
+            id: "mock-gym",
+            name: "Mock Gym",
+            address: "123 Mock St",
+            postcode: 1234,
+            state: "WA",
+            area_size: 500,
+            active: true,
+            timezone: "Australia/Perth",
+        },
+    ];
+
+    let trendCacheResponse: any[] = [];
+
+    const mockGymCount = {
+        id: "count-1",
+        created: new Date().toISOString(),
+        count: 100,
+        ratio: 5,
+        percentage: 50,
+        gym_name: "Mock Gym",
+        gym_id: "mock-gym",
     };
+
+    const collectionMock = (name: string) => ({
+        getFullList: mock(async () => {
+            if (name === "gym_trend_cache") {
+                return [];
+            }
+            if (name === "Revo_Gyms") {
+                return mockGyms;
+            }
+            if (name === "Revo_Gym_Count") {
+                return [mockGymCount];
+            }
+            return [];
+        }),
+        getList: mock(async (_page: number, _limit: number, opts?: any) => {
+            if (name === "Revo_Gym_Count") {
+                return { items: [mockGymCount] };
+            }
+            return { items: [] };
+        }),
+        create: mock(async () => ({})),
+        update: mock(async () => ({})),
+    });
+
     return {
-        db: mockDb
+        pb: {
+            collection: mock((name: string) => collectionMock(name)),
+            authStore: { isValid: true },
+        },
+        ensureAdminAuth: mock(async () => {}),
+        toPbDate: mock((d: Date) => d.toISOString()),
     };
 });
 
@@ -149,7 +165,7 @@ describe("API Endpoint Tests", () => {
         const json = await res.json();
         // The mock DB returns an array inside data
         expect(Array.isArray(json.data)).toBe(true);
-        expect(json.data[0].gymName).toBe("Mock Gym");
+        expect(json.data[0].gym_name).toBe("Mock Gym");
     });
 
     // ===== TREND ENDPOINTS =====
