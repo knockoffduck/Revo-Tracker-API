@@ -632,6 +632,8 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const gymId = existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString();
 		try {
 			await pb.collection("Revo_Gym_Count").create({
+				id: crypto.randomUUID(),
+				created: currentTime,
 				count,
 				ratio: memberRatio,
 				gym_name: canonicalName,
@@ -654,6 +656,8 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			console.log(`${STAGE.DB}       - ${gym.name} (${gym.postcode})`);
 			try {
 				await pb.collection("Revo_Gym_Count").create({
+					id: crypto.randomUUID(),
+					created: currentTime,
 					count: 0,
 					ratio: 0,
 					gym_name: gym.name,
