@@ -630,16 +630,19 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const count = gym.member_count > 0 ? gym.member_count : 0;
 		const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
 		const gymId = existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString();
-		await pb.collection("Revo_Gym_Count").create({
-			created: currentTime,
-			count,
-			ratio: memberRatio,
-			gym_name: canonicalName,
-			percentage,
-			gym_id: gymId,
-			...(existingGym?.id ? { gym_id_rel: existingGym.id } : {}),
-		});
-		inserts++;
+		try {
+			await pb.collection("Revo_Gym_Count").create({
+				count,
+				ratio: memberRatio,
+				gym_name: canonicalName,
+				percentage,
+				gym_id: gymId,
+				...(existingGym?.id ? { gym_id_rel: existingGym.id } : {}),
+			});
+			inserts++;
+		} catch (e: any) {
+			console.error(`${STAGE.DB} ✖ Failed to insert ${canonicalName}:`, JSON.stringify(e?.data ?? e?.response?.data ?? e?.message));
+		}
 	}
 
 	const scrapedGymNames = new Set(gymData.map((g) => normalizeGymName(g.name)));
@@ -649,16 +652,19 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		console.log(`${STAGE.DB} ${STAGE.WARN} ${missingGyms.length} known gyms missing from scrape:`);
 		for (const gym of missingGyms) {
 			console.log(`${STAGE.DB}       - ${gym.name} (${gym.postcode})`);
-			await pb.collection("Revo_Gym_Count").create({
-				created: currentTime,
-				count: 0,
-				ratio: 0,
-				gym_name: gym.name,
-				percentage: 0,
-				gym_id: gym.id,
-				gym_id_rel: gym.id,
-			});
-			inserts++;
+			try {
+				await pb.collection("Revo_Gym_Count").create({
+					count: 0,
+					ratio: 0,
+					gym_name: gym.name,
+					percentage: 0,
+					gym_id: gym.id,
+					gym_id_rel: gym.id,
+				});
+				inserts++;
+			} catch (e: any) {
+				console.error(`${STAGE.DB} ✖ Failed to insert missing gym ${gym.name}:`, JSON.stringify(e?.data ?? e?.response?.data ?? e?.message));
+			}
 		}
 	}
 
