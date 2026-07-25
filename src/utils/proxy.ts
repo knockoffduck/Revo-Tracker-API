@@ -55,11 +55,9 @@ export const getProxyConfig = (context: string): ProxyConfig => {
 		return { proxyLabel: "Direct Connection" };
 	}
 
-	console.log(`[${context}] Using proxy ${domainName}:${proxyPort}`);
 	const agent = new HttpsProxyAgent(proxyUrl);
 	if (insecureTls) {
 		agent.options.rejectUnauthorized = false;
-		console.warn(`[${context}] TLS verification disabled for proxy requests.`);
 	}
 
 	return {
