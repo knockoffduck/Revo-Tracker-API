@@ -114,6 +114,31 @@ const callEveryFiveMinutes = () => {
   ); // 5 minutes
 };
 
+const callEveryTwoDays = () => {
+  const BASE = process.env.SCHEDULER_URL
+    ? process.env.SCHEDULER_URL.replace(/\/gyms\/stats\/update$/, "")
+    : (process.env.NODE_ENV === "production"
+      ? "https://revotrackerapi.dvcklab.com"
+      : "http://localhost:3001");
+  const ENDPOINT = `${BASE}/gyms/update`;
+
+  setInterval(
+    async () => {
+      try {
+        console.log(
+          `[Scheduler] Executing enrichment ${ENDPOINT} at ${new Date().toISOString()}`,
+        );
+        const res = await fetch(ENDPOINT);
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        console.log(`[Scheduler] Enrichment success`);
+      } catch (err) {
+        console.error(`[Scheduler] Enrichment error:`, err);
+      }
+    },
+    2 * 24 * 60 * 60 * 1000,
+  ); // 2 days
+};
+
 // Type guard function to check if an object is of type Gym
 const isGym = (data: any): data is GymInfo => {
   return (
@@ -152,12 +177,10 @@ app.get("/gyms/update", async (c) => {
 
 app.get("/gyms/stats/update", async (c) => {
   try {
-    let rawGymData = await parseHTML();
+    const rawGymData = await parseHTML();
     if (!isGymArray(rawGymData)) {
       return handleError(c, { message: "Data is not of type Gym[]" });
     }
-    rawGymData = await enrichGymData(rawGymData);
-    await updateGymInfo(rawGymData);
     await insertGymStats(rawGymData);
 
     return handleSuccess(c, { message: "Gym stats updated successfully" });
@@ -274,6 +297,7 @@ app.get("/gyms/trends", async (c) => {
 
 if (import.meta.main) {
   callEveryFiveMinutes();
+  callEveryTwoDays();
 }
 
 export default {
