@@ -9,6 +9,13 @@ import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
 import { sendAlert } from "./alerts";
 
+/** Generate a PocketBase-compatible 15-char alphanumeric record ID. */
+const generatePbId = (): string => {
+	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+	const bytes = crypto.getRandomValues(new Uint8Array(15));
+	return Array.from(bytes, (b) => chars[b % chars.length]).join("");
+};
+
 // ---- Logging helpers ----
 
 const STAGE = {
@@ -632,7 +639,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const gymId = existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString();
 		try {
 			await pb.collection("Revo_Gym_Count").create({
-				id: crypto.randomUUID(),
+				id: generatePbId(),
 				created: currentTime,
 				count,
 				ratio: memberRatio,
@@ -656,7 +663,7 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			console.log(`${STAGE.DB}       - ${gym.name} (${gym.postcode})`);
 			try {
 				await pb.collection("Revo_Gym_Count").create({
-					id: crypto.randomUUID(),
+					id: generatePbId(),
 					created: currentTime,
 					count: 0,
 					ratio: 0,
