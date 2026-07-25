@@ -32,6 +32,7 @@ mock.module("../src/utils/database", () => ({
     },
     ensureAdminAuth: mock(async () => {}),
     toPbDate: mock((d: Date) => d.toISOString()),
+    toSqlDate: mock((d: Date) => d.toISOString().slice(0, 19).replace("T", " ")),
 }));
 
 const sampleGymData: GymInfo[] = [

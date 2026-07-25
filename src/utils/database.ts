@@ -50,5 +50,9 @@ ensureAdminAuth().catch((err) => {
 	console.error("[PocketBase] Initial admin auth failed:", err);
 });
 
-/** Format a JS Date as a PocketBase date string. */
+/** Format a JS Date as a PocketBase date string (ISO 8601). */
 export const toPbDate = (date: Date): string => date.toISOString();
+
+/** Format a JS Date as a MySQL-compatible datetime string (YYYY-MM-DD HH:MM:SS). */
+export const toSqlDate = (date: Date): string =>
+	date.toISOString().slice(0, 19).replace("T", " ");

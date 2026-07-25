@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { file } from "bun";
-import { pb, ensureAdminAuth, toPbDate } from "./database";
+import { pb, ensureAdminAuth, toPbDate, toSqlDate } from "./database";
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
@@ -419,6 +419,7 @@ const insertGymStatsSql = async (
 	if (!sqlDb) return;
 
 	try {
+		const sqlTime = toSqlDate(new Date(currentTime));
 		const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 		const rows = [];
 
@@ -431,7 +432,7 @@ const insertGymStatsSql = async (
 			const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
 			rows.push({
 				id: crypto.randomUUID(),
-				created: currentTime,
+				created: sqlTime,
 				count,
 				ratio: memberRatio,
 				gymName: canonicalName,
@@ -443,7 +444,7 @@ const insertGymStatsSql = async (
 		for (const gym of missingGyms) {
 			rows.push({
 				id: crypto.randomUUID(),
-				created: currentTime,
+				created: sqlTime,
 				count: 0,
 				ratio: 0,
 				gymName: gym.name,
@@ -464,6 +465,7 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 	if (!sqlDb) return;
 
 	try {
+		const sqlTime = toSqlDate(new Date(currentTime));
 		const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 		for (const gym of gymData) {
@@ -477,7 +479,7 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 				postcode,
 				state: gym.state !== "Unknown" ? gym.state : (existingGym?.state ?? gym.state),
 				areaSize: gym.size || existingGym?.area_size || 0,
-				lastUpdated: currentTime,
+				lastUpdated: sqlTime,
 				active: 1,
 				timezone: existingGym?.timezone ?? "Australia/Perth",
 				longitude: existingGym?.longitude ?? 0,
@@ -627,14 +629,15 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		const canonicalSize = existingGym?.area_size || gym.size;
 		const count = gym.member_count > 0 ? gym.member_count : 0;
 		const { memberRatio, percentage } = calculateGymRatios(canonicalSize, count);
+		const gymId = existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString();
 		await pb.collection("Revo_Gym_Count").create({
 			created: currentTime,
 			count,
 			ratio: memberRatio,
 			gym_name: canonicalName,
 			percentage,
-			gym_id: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
-			gym_id_rel: existingGym?.id ?? simpleIntegerHash(canonicalName + canonicalPostcode.toString()).toString(),
+			gym_id: gymId,
+			...(existingGym?.id ? { gym_id_rel: existingGym.id } : {}),
 		});
 		inserts++;
 	}

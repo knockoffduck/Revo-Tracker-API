@@ -279,5 +279,5 @@ if (import.meta.main) {
 export default {
   port: Number(process.env.PORT ?? 3001),
   fetch: app.fetch,
-  idleTimeout: 60 // 5 minutes (default is 30s in Bun, Hono might be interfering or client side timeout, but user said "bun.server has timed out")
+  idleTimeout: 300 // scrape + enrichment takes 80s+; 60s causes ECONNRESET
 };
