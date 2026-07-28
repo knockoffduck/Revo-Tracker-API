@@ -4,7 +4,8 @@
     "dev": "bun run --hot src/index.ts",
     "start": "bun run src/index.ts",
     "test": "bun test",
-    "audit:dropouts": "bun run scripts/repair-gym-dropouts.ts"
+    "audit:dropouts": "bun run scripts/repair-gym-dropouts.ts",
+    "archive:gym-count": "bun run scripts/archive-gym-count.ts"
   },
   "dependencies": {
     "axios": "^1.13.4",

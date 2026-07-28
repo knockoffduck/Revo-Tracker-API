@@ -139,6 +139,26 @@ const callEveryTwoDays = () => {
   ); // 2 days
 };
 
+const ARCHIVE_RETENTION_DAYS = Number(process.env.ARCHIVE_RETENTION_DAYS ?? "90");
+
+const callArchiveWeekly = () => {
+  const runArchive = async () => {
+    try {
+      console.log(`[Scheduler] Starting weekly archive at ${new Date().toISOString()}`);
+      const { archiveGymCount } = await import("../scripts/archive-gym-count");
+      const result = await archiveGymCount(ARCHIVE_RETENTION_DAYS, false);
+      console.log(`[Scheduler] Archive complete: ${result.deleted}/${result.total} rows removed`);
+    } catch (err) {
+      console.error(`[Scheduler] Archive error:`, err);
+    }
+  };
+
+  // Run once 5 minutes after startup (catch up on anything missed while down),
+  // then every 7 days.
+  setTimeout(runArchive, 5 * 60 * 1000);
+  setInterval(runArchive, 7 * 24 * 60 * 60 * 1000);
+};
+
 // Type guard function to check if an object is of type Gym
 const isGym = (data: any): data is GymInfo => {
   return (
@@ -298,6 +318,7 @@ app.get("/gyms/trends", async (c) => {
 if (import.meta.main) {
   callEveryFiveMinutes();
   callEveryTwoDays();
+  callArchiveWeekly();
 }
 
 export default {
