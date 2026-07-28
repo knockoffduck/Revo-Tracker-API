@@ -10,7 +10,9 @@ export const handleSuccess = (ctx: any, data: any, status: number = 200) => {
 
 // Error handler
 export const handleError = (ctx: any, error: any, status: number = 500) => {
-	console.error("Error inserting data:", error);
+	if (status >= 500) {
+		console.error("Error handling request:", error);
+	}
 
 	return ctx.json(
 		{

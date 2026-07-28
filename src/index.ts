@@ -14,6 +14,14 @@ const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX = 60; // requests per window per IP
 
+// Periodically evict expired entries to prevent unbounded memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitStore) {
+    if (entry.resetAt <= now) rateLimitStore.delete(ip);
+  }
+}, RATE_LIMIT_WINDOW_MS);
+
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }) {
   const forwardedFor = c.req.header("x-forwarded-for");
   const realIp = c.req.header("x-real-ip");
@@ -195,7 +203,13 @@ app.get("/gyms/update", async (c) => {
   return handleSuccess(c, { message: "Data updated successfully" });
 });
 
+let isScrapeRunning = false;
+
 app.get("/gyms/stats/update", async (c) => {
+  if (isScrapeRunning) {
+    return handleError(c, { message: "A scrape is already in progress" }, 409);
+  }
+  isScrapeRunning = true;
   try {
     const rawGymData = await parseHTML();
     if (!isGymArray(rawGymData)) {
@@ -207,6 +221,8 @@ app.get("/gyms/stats/update", async (c) => {
   } catch (error) {
     console.error("Error inserting gym stats:", error);
     return handleError(c, error);
+  } finally {
+    isScrapeRunning = false;
   }
 });
 

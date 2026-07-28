@@ -1,100 +1,98 @@
 [
   {
+    "timestamp": "2026-07-28T16:57:43.226Z",
+    "gymCount": 1,
+    "missingGyms": 0,
+    "totalKnownGyms": 1,
+    "data": [
+      {
+        "name": "Mock Gym",
+        "address": "123 Mock St",
+        "postcode": 1234,
+        "size": 500,
+        "state": "WA",
+        "member_count": 50,
+        "member_ratio": 10,
+        "percentage": 100
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-07-28T16:57:36.747Z",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "totalKnownGyms": 2,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      },
+      {
+        "name": "Other Gym",
+        "address": "456 Other St",
+        "postcode": 6001,
+        "size": 800,
+        "state": "WA",
+        "member_count": 0,
+        "member_ratio": 0,
+        "percentage": 0
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-07-28T16:54:46.975Z",
+    "gymCount": 1,
+    "missingGyms": 0,
+    "totalKnownGyms": 1,
+    "data": [
+      {
+        "name": "Mock Gym",
+        "address": "123 Mock St",
+        "postcode": 1234,
+        "size": 500,
+        "state": "WA",
+        "member_count": 50,
+        "member_ratio": 10,
+        "percentage": 100
+      }
+    ]
+  },
+  {
+    "timestamp": "2026-07-28T16:54:44.094Z",
+    "gymCount": 1,
+    "missingGyms": 1,
+    "totalKnownGyms": 2,
+    "data": [
+      {
+        "name": "Test Gym",
+        "address": "123 Test St",
+        "postcode": 6000,
+        "state": "WA",
+        "size": 1000,
+        "member_count": 100,
+        "member_ratio": 10,
+        "percentage": 50
+      },
+      {
+        "name": "Other Gym",
+        "address": "456 Other St",
+        "postcode": 6001,
+        "size": 800,
+        "state": "WA",
+        "member_count": 0,
+        "member_ratio": 0,
+        "percentage": 0
+      }
+    ]
+  },
+  {
     "timestamp": "2026-07-25T10:32:55.049Z",
-    "gymCount": 1,
-    "missingGyms": 0,
-    "totalKnownGyms": 1,
-    "data": [
-      {
-        "name": "Mock Gym",
-        "address": "123 Mock St",
-        "postcode": 1234,
-        "size": 500,
-        "state": "WA",
-        "member_count": 50,
-        "member_ratio": 10,
-        "percentage": 100,
-        "squat_racks": 5
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-07-25T10:32:52.728Z",
-    "gymCount": 1,
-    "missingGyms": 1,
-    "totalKnownGyms": 2,
-    "data": [
-      {
-        "name": "Test Gym",
-        "address": "123 Test St",
-        "postcode": 6000,
-        "state": "WA",
-        "size": 1000,
-        "member_count": 100,
-        "member_ratio": 10,
-        "percentage": 50
-      },
-      {
-        "name": "Other Gym",
-        "address": "456 Other St",
-        "postcode": 6001,
-        "size": 800,
-        "state": "WA",
-        "member_count": 0,
-        "member_ratio": 0,
-        "percentage": 0
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-07-22T16:33:50.466Z",
-    "gymCount": 1,
-    "missingGyms": 0,
-    "totalKnownGyms": 1,
-    "data": [
-      {
-        "name": "Mock Gym",
-        "address": "123 Mock St",
-        "postcode": 1234,
-        "size": 500,
-        "state": "WA",
-        "member_count": 50,
-        "member_ratio": 10,
-        "percentage": 100,
-        "squat_racks": 5
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-07-22T16:33:47.181Z",
-    "gymCount": 1,
-    "missingGyms": 1,
-    "totalKnownGyms": 2,
-    "data": [
-      {
-        "name": "Test Gym",
-        "address": "123 Test St",
-        "postcode": 6000,
-        "state": "WA",
-        "size": 1000,
-        "member_count": 100,
-        "member_ratio": 10,
-        "percentage": 50
-      },
-      {
-        "name": "Other Gym",
-        "address": "456 Other St",
-        "postcode": 6001,
-        "size": 800,
-        "state": "WA",
-        "member_count": 0,
-        "member_ratio": 0,
-        "percentage": 0
-      }
-    ]
-  },
-  {
-    "timestamp": "2026-07-22T16:32:28.824Z",
     "gymCount": 1,
     "missingGyms": 0,
     "totalKnownGyms": 1,

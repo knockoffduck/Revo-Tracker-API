@@ -52,18 +52,30 @@ export const generateTimeSlots = (): string[] => {
 };
 
 /**
- * Helper to get local time parts from a date string and timezone
+ * Helper to get local time parts from a date string and timezone.
+ * Formatters are cached per timezone to avoid re-creating them for every record.
  */
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
+const getFormatter = (timeZone: string): Intl.DateTimeFormat => {
+	let fmt = formatterCache.get(timeZone);
+	if (!fmt) {
+		fmt = new Intl.DateTimeFormat("en-US", {
+			timeZone,
+			weekday: "short",
+			hour: "numeric",
+			minute: "numeric",
+			hour12: false,
+		});
+		formatterCache.set(timeZone, fmt);
+	}
+	return fmt;
+};
+
 export const getLocalTimeParts = (dateStr: string, timeZone: string) => {
 	const utcDate = new Date(dateStr.endsWith("Z") ? dateStr : dateStr + "Z");
 
-	const formatter = new Intl.DateTimeFormat("en-US", {
-		timeZone,
-		weekday: "short",
-		hour: "numeric",
-		minute: "numeric",
-		hour12: false,
-	});
+	const formatter = getFormatter(timeZone);
 
 	const parts = formatter.formatToParts(utcDate);
 	const partMap = new Map(parts.map((p) => [p.type, p.value]));
