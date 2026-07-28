@@ -38,9 +38,12 @@ const DEFAULT_LOOKBACK_DAYS = 90;
 const SLOT_DURATION_MINUTES = 15;
 
 /**
- * Generates all 15-minute time slot keys for a day
+ * Generates all 15-minute time slot keys for a day.
+ * The result is cached since it never changes.
  */
+let _timeSlots: string[] | null = null;
 export const generateTimeSlots = (): string[] => {
+	if (_timeSlots) return _timeSlots;
 	const slots: string[] = [];
 	for (let hour = 0; hour < 24; hour++) {
 		for (let minute = 0; minute < 60; minute += SLOT_DURATION_MINUTES) {
@@ -48,6 +51,7 @@ export const generateTimeSlots = (): string[] => {
 			slots.push(timeStr);
 		}
 	}
+	_timeSlots = slots;
 	return slots;
 };
 
