@@ -57,6 +57,10 @@ export const generateTimeSlots = (): string[] => {
  */
 const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
+const WEEKDAY_MAP: Record<string, number> = {
+	Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
 const getFormatter = (timeZone: string): Intl.DateTimeFormat => {
 	let fmt = formatterCache.get(timeZone);
 	if (!fmt) {
@@ -80,10 +84,6 @@ export const getLocalTimeParts = (dateStr: string, timeZone: string) => {
 	const parts = formatter.formatToParts(utcDate);
 	const partMap = new Map(parts.map((p) => [p.type, p.value]));
 
-	const weekdayMap: Record<string, number> = {
-		Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-	};
-
 	const dayStr = partMap.get("weekday")!;
 	const hourStr = partMap.get("hour")!;
 	const minuteStr = partMap.get("minute")!;
@@ -92,7 +92,7 @@ export const getLocalTimeParts = (dateStr: string, timeZone: string) => {
 	const roundedMinute = Math.floor(minuteNum / SLOT_DURATION_MINUTES) * SLOT_DURATION_MINUTES;
 
 	return {
-		dayOfWeek: weekdayMap[dayStr],
+		dayOfWeek: WEEKDAY_MAP[dayStr],
 		timeSlot: `${hourStr.padStart(2, "0")}:${roundedMinute.toString().padStart(2, "0")}`,
 	};
 };
