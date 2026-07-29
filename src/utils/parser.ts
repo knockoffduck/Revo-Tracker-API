@@ -628,20 +628,29 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	});
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
-	const BATCH_SIZE = 10;
 	let inserts = 0;
 
-	const insertOne = async (payload: Record<string, unknown>, label: string) => {
-		try {
-			await pb.collection("Revo_Gym_Count").create(payload);
-			return true;
-		} catch (e: any) {
-			console.error(`${STAGE.DB} ✖ Failed to insert ${label}:`, JSON.stringify(e?.data ?? e?.response?.data ?? e?.message));
-			return false;
+	const insertOne = async (payload: Record<string, unknown>, label: string, retries = 2) => {
+		for (let attempt = 0; attempt <= retries; attempt++) {
+			try {
+				await pb.collection("Revo_Gym_Count").create(payload);
+				return true;
+			} catch (e: any) {
+				const status = e?.status ?? e?.response?.status;
+				const msg = e?.message ?? "unknown error";
+				const data = JSON.stringify(e?.data ?? e?.response?.data ?? {});
+				if (attempt < retries && (status >= 500 || status === 429)) {
+					await Bun.sleep(100 * (attempt + 1));
+					continue;
+				}
+				console.error(`${STAGE.DB} ✖ Failed to insert ${label}: [${status}] ${msg} ${data}`);
+				return false;
+			}
 		}
+		return false;
 	};
 
-	// Build all payloads first, then insert in parallel batches
+	// Build all payloads, then insert sequentially (avoids SQLite write contention)
 	const payloads: { payload: Record<string, unknown>; label: string }[] = [];
 	for (const gym of gymData) {
 		const existingGym = gymsByNormalizedName.get(normalizeGymName(gym.name));
@@ -666,10 +675,8 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		});
 	}
 
-	for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
-		const batch = payloads.slice(i, i + BATCH_SIZE);
-		const results = await Promise.all(batch.map(({ payload, label }) => insertOne(payload, label)));
-		inserts += results.filter(Boolean).length;
+	for (const { payload, label } of payloads) {
+		if (await insertOne(payload, label)) inserts++;
 	}
 
 	const scrapedGymNames = new Set(gymData.map((g) => normalizeGymName(g.name)));
@@ -693,10 +700,8 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			} as Record<string, unknown>,
 			label: gym.name,
 		}));
-		for (let i = 0; i < missingPayloads.length; i += BATCH_SIZE) {
-			const batch = missingPayloads.slice(i, i + BATCH_SIZE);
-			const results = await Promise.all(batch.map(({ payload, label }) => insertOne(payload, label)));
-			inserts += results.filter(Boolean).length;
+		for (const { payload, label } of missingPayloads) {
+			if (await insertOne(payload, label)) inserts++;
 		}
 	}
 
