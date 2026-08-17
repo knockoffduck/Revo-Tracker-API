@@ -159,6 +159,54 @@ describe("API Endpoint Tests", () => {
         expect(json.data.message).toContain("Gym stats updated successfully");
     });
 
+    test("GET /gyms/stats/update releases the lock when the scrape hangs (timeout regression)", async () => {
+        // Short deadline so the hung scrape aborts quickly.
+        process.env.SCRAPE_DEADLINE_MS = "2000";
+
+        // Hermetic login: fake the Netpulse endpoints so no real network is used.
+        const realFetch = globalThis.fetch;
+        const mockFetch = mock(async (url: string) => {
+            if (url.includes("/np/exerciser/login")) {
+                return new Response(JSON.stringify({ uuid: "test-uuid" }), {
+                    status: 200,
+                    headers: { "set-cookie": "JSESSIONID=abc123" },
+                });
+            }
+            if (url.includes("/tokens/BMA")) {
+                return new Response(JSON.stringify({ accessToken: "test-token" }), {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            }
+            return new Response("", { status: 404 });
+        });
+        globalThis.fetch = mockFetch as any;
+
+        try {
+            // First request: mock axios hangs forever → the scrape never settles.
+            const realGet = (await import("axios")).default.get as any;
+            (await import("axios")).default.get = mock(async () => new Promise(() => {}));
+
+            const req1 = new Request("http://localhost/gyms/stats/update");
+            const res1 = await app.fetch(req1);
+            expect(res1.status).toBe(500);
+
+            // Restore the axios mock so the follow-up scrape succeeds.
+            (await import("axios")).default.get = realGet;
+
+            // Second request must NOT be 409 — the deadline must have cleared the lock.
+            const req2 = new Request("http://localhost/gyms/stats/update");
+            const res2 = await app.fetch(req2);
+            expect(res2.status).toBe(200);
+            const json = await res2.json();
+            expect(json.message).toBe("Success");
+            expect(json.data.message).toContain("Gym stats updated successfully");
+        } finally {
+            globalThis.fetch = realFetch;
+            delete process.env.SCRAPE_DEADLINE_MS;
+        }
+    });
+
     test("GET /gyms/stats/latest should return data", async () => {
         const req = new Request("http://localhost/gyms/stats/latest");
         const res = await app.fetch(req);

@@ -111,7 +111,7 @@ const callEveryFiveMinutes = () => {
         console.log(
           `[Scheduler] Executing ${ENDPOINT} at ${new Date().toISOString()}`,
         );
-        const res = await fetch(ENDPOINT);
+        const res = await fetch(ENDPOINT, { signal: AbortSignal.timeout(60_000) });
         if (!res.ok) throw new Error(`Status ${res.status}`);
         console.log(`[Scheduler] Success`);
       } catch (err) {
@@ -205,18 +205,36 @@ app.get("/gyms/update", async (c) => {
 
 let isScrapeRunning = false;
 
+// Hard cap on a single scrape so the in-process lock can never wedge the
+// scheduler forever. Normal runs take ~10-30s; a run exceeding this is hung.
+// Read per request so tests can override without restarting the module.
+const scrapeDeadlineMs = () => Number(process.env.SCRAPE_DEADLINE_MS ?? 3 * 60 * 1000);
+
 app.get("/gyms/stats/update", async (c) => {
   if (isScrapeRunning) {
     return handleError(c, { message: "A scrape is already in progress" }, 409);
   }
   isScrapeRunning = true;
   try {
-    const rawGymData = await parseHTML();
-    if (!isGymArray(rawGymData)) {
-      return handleError(c, { message: "Data is not of type Gym[]" });
-    }
-    await insertGymStats(rawGymData);
+    const deadlineMs = scrapeDeadlineMs();
+    const scrape = (async () => {
+      const rawGymData = await parseHTML();
+      if (!isGymArray(rawGymData)) {
+        throw new Error("Data is not of type Gym[]");
+      }
+      await insertGymStats(rawGymData);
+      return rawGymData;
+    })();
 
+    const timeout = new Promise<never>((_, reject) => {
+      const t = setTimeout(() => {
+        reject(new Error(`Scrape timed out after ${deadlineMs / 1000}s`));
+      }, deadlineMs);
+      // Clear the timer when the scrape settles first, so it can't fire late.
+      scrape.then(() => clearTimeout(t), () => clearTimeout(t));
+    });
+
+    await Promise.race([scrape, timeout]);
     return handleSuccess(c, { message: "Gym stats updated successfully" });
   } catch (error) {
     console.error("Error inserting gym stats:", error);

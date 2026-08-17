@@ -142,6 +142,7 @@ const loginAndFetchToken = async (): Promise<string | null> => {
 				Accept: "application/json,text/plain",
 			},
 			body: `password=${encodeURIComponent(password)}&username=${encodeURIComponent(email)}`,
+			signal: AbortSignal.timeout(15000),
 		});
 		if (!loginRes.ok) return null;
 
@@ -161,6 +162,7 @@ const loginAndFetchToken = async (): Promise<string | null> => {
 				"X-NP-API-Version": "1.5",
 				Accept: "application/json,text/plain",
 			},
+			signal: AbortSignal.timeout(15000),
 		});
 		if (!tokenRes.ok) return null;
 
