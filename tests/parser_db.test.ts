@@ -1,4 +1,5 @@
 import { describe, expect, test, mock } from "bun:test";
+import { ClientResponseError } from "pocketbase";
 import { GymInfo } from "../src/utils/types";
 
 const mockInsert = mock(() => mockDb);
@@ -16,6 +17,20 @@ mock.module("../src/db/database", () => ({
     sqlDb: mockDb,
 }));
 
+const mockEnsureAdminAuth = mock(async () => {});
+const mockInvalidateAdminAuth = mock(() => {});
+
+// Rows that PocketBase would have persisted; a test can swap `createImpl` to
+// simulate the server rejecting a write.
+const createdRows: Record<string, unknown>[] = [];
+let createImpl: (payload: Record<string, unknown>) => Promise<unknown> = async () => ({});
+
+const mockCreate = mock(async (payload: Record<string, unknown>) => {
+    const result = await createImpl(payload);
+    createdRows.push(payload);
+    return result;
+});
+
 // Mock the PocketBase client with a fixed gym list
 mock.module("../src/utils/database", () => ({
     pb: {
@@ -25,12 +40,13 @@ mock.module("../src/utils/database", () => ({
                 { id: "other-gym", name: "Other Gym", postcode: 6001, active: true, area_size: 800, address: "456 Other St", state: "WA", squat_racks: 0, timezone: "Australia/Perth" },
             ]),
             getList: mock(async () => ({ items: [] })),
-            create: mock(async () => ({})),
+            create: mockCreate,
             update: mock(async () => ({})),
         })),
         authStore: { isValid: true },
     },
-    ensureAdminAuth: mock(async () => {}),
+    ensureAdminAuth: mockEnsureAdminAuth,
+    invalidateAdminAuth: mockInvalidateAdminAuth,
     toPbDate: mock((d: Date) => d.toISOString()),
     toSqlDate: mock((d: Date) => d.toISOString().slice(0, 19).replace("T", " ")),
 }));
@@ -64,5 +80,50 @@ describe("Parser Database Operations", () => {
 
         expect(mockInsert).toHaveBeenCalled();
         expect(mockInsert).toHaveBeenCalledTimes(2);
+    });
+});
+
+describe("Parser auth recovery", () => {
+    test("a token rejected by PocketBase is refreshed and the row is still written", async () => {
+        let createAttempts = 0;
+        createdRows.length = 0;
+        mockEnsureAdminAuth.mockClear();
+        mockInvalidateAdminAuth.mockClear();
+        createImpl = async () => {
+            createAttempts++;
+            if (createAttempts === 1) {
+                throw new ClientResponseError({
+                    url: "https://pb.test/api/collections/Revo_Gym_Count/records",
+                    status: 403,
+                    response: { error: "Only superusers can perform this action." },
+                });
+            }
+            return {};
+        };
+
+        const { insertGymStats } = await import("../src/utils/parser");
+        await insertGymStats(sampleGymData);
+
+        expect(createdRows.map((row) => row.gym_name)).toEqual(["Test Gym", "Other Gym"]);
+        expect(mockInvalidateAdminAuth).toHaveBeenCalledTimes(1);
+        expect(mockEnsureAdminAuth).toHaveBeenCalledTimes(2); // startup + after the rejection
+
+        createImpl = async () => ({});
+    });
+
+    test("a run that writes nothing fails instead of reporting success", async () => {
+        createdRows.length = 0;
+        createImpl = async () => {
+            throw new ClientResponseError({
+                url: "https://pb.test/api/collections/Revo_Gym_Count/records",
+                status: 403,
+                response: { error: "Only superusers can perform this action." },
+            });
+        };
+
+        const { insertGymStats } = await import("../src/utils/parser");
+        await expect(insertGymStats(sampleGymData)).rejects.toThrow(/inserts failed/i);
+
+        createImpl = async () => ({});
     });
 });

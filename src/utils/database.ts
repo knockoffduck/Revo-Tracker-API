@@ -5,6 +5,33 @@ const POCKETBASE_URL = process.env.POCKETBASE_URL ?? "https://pb.dvcklab.work";
 
 export const pb = new PocketBase(POCKETBASE_URL);
 
+/**
+ * Drop the cached superuser token so the next `ensureAdminAuth()` authenticates
+ * again from `POCKETBASE_ADMIN_*`.
+ *
+ * PocketBase revokes every previously issued token whenever the superuser
+ * record changes (tokenKey rotation on a dashboard save, `pocketbase superuser`
+ * CLI update, restore), but the SDK only inspects the JWT `exp` — so the
+ * revoked token keeps looking valid for up to its full 24h lifetime while every
+ * privileged request is rejected.
+ */
+export const invalidateAdminAuth = (): void => {
+	pb.authStore.clear();
+};
+
+// A 401/403 on a request that carried a token means the server no longer
+// accepts it, regardless of what `authStore.isValid` believes. Clear the store
+// so the next call re-authenticates instead of failing until `exp` passes.
+pb.afterSend = (response, data) => {
+	if ((response.status === 401 || response.status === 403) && pb.authStore.token) {
+		console.warn(
+			`[PocketBase] ${response.status} on ${response.url} — cached admin token rejected, clearing`,
+		);
+		invalidateAdminAuth();
+	}
+	return data;
+};
+
 let adminAuthPromise: Promise<void> | null = null;
 
 export const ensureAdminAuth = async (): Promise<void> => {

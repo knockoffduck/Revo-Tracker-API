@@ -62,6 +62,7 @@ mock.module("../src/utils/database", () => {
             authStore: { isValid: true },
         },
         ensureAdminAuth: mock(async () => {}),
+        invalidateAdminAuth: mock(() => {}),
         toPbDate: mock((d: Date) => d.toISOString()),
         toSqlDate: mock((d: Date) => d.toISOString().slice(0, 19).replace("T", " ")),
     };

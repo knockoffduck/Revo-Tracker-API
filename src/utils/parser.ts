@@ -1,7 +1,8 @@
 import * as cheerio from "cheerio";
+import { ClientResponseError } from "pocketbase";
 import { GymInfo } from "./types";
 import { file } from "bun";
-import { pb, ensureAdminAuth, toPbDate, toSqlDate } from "./database";
+import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from "./database";
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { simpleIntegerHash } from "./tools";
@@ -633,23 +634,40 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	let inserts = 0;
 
 	const insertOne = async (payload: Record<string, unknown>, label: string, retries = 2) => {
-		for (let attempt = 0; attempt <= retries; attempt++) {
+		let transientAttempts = 0;
+		let authAttempts = 0;
+
+		for (;;) {
 			try {
 				await pb.collection("Revo_Gym_Count").create(payload);
 				return true;
-			} catch (e: any) {
-				const status = e?.status ?? e?.response?.status;
-				const msg = e?.message ?? "unknown error";
-				const data = JSON.stringify(e?.data ?? e?.response?.data ?? {});
-				if (attempt < retries && (status >= 500 || status === 429)) {
-					await Bun.sleep(100 * (attempt + 1));
+			} catch (e: unknown) {
+				// The SDK re-wraps every transport/server failure as ClientResponseError.
+				const err = e instanceof ClientResponseError ? e : null;
+				const status = err?.status ?? 0;
+				const msg = err?.message ?? (e instanceof Error ? e.message : "unknown error");
+				const data = JSON.stringify(err?.data ?? {});
+
+				// Revoked superuser token (see invalidateAdminAuth): re-authenticate
+				// and retry the write once instead of failing for the rest of the run.
+				if ((status === 401 || status === 403) && authAttempts === 0) {
+					authAttempts++;
+					console.warn(`${STAGE.DB} ${STAGE.WARN} ${label}: [${status}] ${data} — re-authenticating`);
+					invalidateAdminAuth();
+					await ensureAdminAuth();
 					continue;
 				}
+
+				if (transientAttempts < retries && (status >= 500 || status === 429)) {
+					transientAttempts++;
+					await Bun.sleep(100 * transientAttempts);
+					continue;
+				}
+
 				console.error(`${STAGE.DB} ✖ Failed to insert ${label}: [${status}] ${msg} ${data}`);
 				return false;
 			}
 		}
-		return false;
 	};
 
 	// Build all payloads, then insert sequentially (avoids SQLite write contention)
@@ -677,7 +695,9 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		});
 	}
 
+	let attempted = 0;
 	for (const { payload, label } of payloads) {
+		attempted++;
 		if (await insertOne(payload, label)) inserts++;
 	}
 
@@ -703,8 +723,25 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 			label: gym.name,
 		}));
 		for (const { payload, label } of missingPayloads) {
+			attempted++;
 			if (await insertOne(payload, label)) inserts++;
 		}
+	}
+
+	// A snapshot that silently writes nothing is worse than a failed run: the
+	// site keeps serving stale numbers with no signal. Make both cases loud.
+	const failed = attempted - inserts;
+	if (failed > 0) {
+		await sendAlert(
+			"error",
+			"Revo_Gym_Count inserts failed",
+			`${failed}/${attempted} rows rejected for snapshot ${currentTime}`,
+		);
+	}
+	if (attempted > 0 && inserts === 0) {
+		throw new Error(
+			`All ${attempted} Revo_Gym_Count inserts failed for snapshot ${currentTime}`,
+		);
 	}
 
 	await insertGymStatsSql(gymData, currentTime, gymList, missingGyms);
