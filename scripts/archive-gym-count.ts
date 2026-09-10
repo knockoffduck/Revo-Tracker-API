@@ -14,6 +14,7 @@
  */
 
 import { pb, ensureAdminAuth } from "../src/utils/database";
+import { sendAlert } from "../src/utils/alerts";
 
 const COLLECTION = "Revo_Gym_Count";
 const BATCH_SIZE = 500;
@@ -104,8 +105,15 @@ const main = async () => {
 if (import.meta.main) {
 	main()
 		.then(() => process.exit(0))
-		.catch((err) => {
+		.catch(async (err) => {
 			console.error("[Archive] Fatal error:", err);
+			await sendAlert({
+				key: "archive.run",
+				severity: "error",
+				title: "90-day snapshot archive failed",
+				details: "Revo_Gym_Count keeps growing past the retention window until this succeeds",
+				error: err,
+			});
 			process.exit(1);
 		});
 }

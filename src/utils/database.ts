@@ -1,5 +1,6 @@
 import "dotenv/config";
 import PocketBase from "pocketbase";
+import { resolveAlert, sendAlert } from "./alerts";
 
 const POCKETBASE_URL = process.env.POCKETBASE_URL ?? "https://pb.dvcklab.work";
 
@@ -49,6 +50,7 @@ export const ensureAdminAuth = async (): Promise<void> => {
 			.then(() => {
 				console.log("[PocketBase] Admin authenticated");
 				adminAuthPromise = null;
+				void resolveAlert("pb.auth");
 			})
 			.catch((err) => {
 				adminAuthPromise = null;
@@ -69,12 +71,28 @@ setInterval(async () => {
 		}
 	} catch (err) {
 		console.error("[PocketBase] Admin auth refresh failed:", err);
+		await sendAlert({
+			key: "pb.auth",
+			severity: "error",
+			title: "PocketBase admin authentication failed",
+			details: `Credentials from POCKETBASE_ADMIN_EMAIL against ${POCKETBASE_URL}`,
+			error: err,
+			hint: "verify the superuser credentials in the deployed environment; every privileged read and write fails until this recovers",
+		});
 	}
 }, 24 * 60 * 60 * 1000);
 
 // Attempt initial auth on startup, but do not block server boot.
 ensureAdminAuth().catch((err) => {
 	console.error("[PocketBase] Initial admin auth failed:", err);
+	void sendAlert({
+		key: "pb.auth",
+		severity: "error",
+		title: "PocketBase admin authentication failed at startup",
+		details: `Credentials from POCKETBASE_ADMIN_EMAIL against ${POCKETBASE_URL}`,
+		error: err,
+		hint: "verify the superuser credentials in the deployed environment",
+	});
 });
 
 /** Format a JS Date as a PocketBase date string (ISO 8601). */

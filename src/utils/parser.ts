@@ -5,10 +5,10 @@ import { file } from "bun";
 import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from "./database";
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
-import { simpleIntegerHash } from "./tools";
+import { readString, simpleIntegerHash } from "./tools";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
-import { sendAlert } from "./alerts";
+import { describeError, resolveAlert, sendAlert } from "./alerts";
 
 /** Generate a PocketBase-compatible 15-char alphanumeric record ID. */
 const generatePbId = (): string => {
@@ -54,8 +54,9 @@ type ScrapeSession = {
 };
 
 let currentSession: ScrapeSession | null = null;
-let lastAllCookiesFailedAlert = 0;
-const ALERT_COOLDOWN_MS = 60 * 60 * 1000; // minimum 1h between same alerts
+
+/** Why the login/token path produced nothing, carried into the failure alert. */
+let lastTokenPathResult = "not attempted";
 
 const nowIso = () => new Date().toISOString();
 
@@ -71,26 +72,33 @@ const cookieToReadable = (cookie: string): string => {
 	}
 };
 
-const alertAllCookiesFailed = (cookies: string[]) => {
-	const now = Date.now();
-	if (now - lastAllCookiesFailedAlert < ALERT_COOLDOWN_MS) {
-		console.log(`${STAGE.FETCH} Alert suppressed (cooldown active — last alert < 1h ago)`);
-		return;
-	}
-	lastAllCookiesFailedAlert = now;
+/**
+ * One alert for "the scrape produced no counts", carrying what each auth path
+ * actually reported so the cause is visible without opening the logs.
+ */
+const alertScrapeFailed = (cookieCount: number) => {
+	const attempts = currentSession?.cookieAttempts ?? [];
+	const zeroGyms = attempts.filter((attempt) => attempt.status === "zero_gyms").length;
+	const networkErrors = attempts.filter((attempt) => attempt.status === "network_error");
+	const lastNetworkError = networkErrors.at(-1);
 
-	const body = [
-		`All <b>${cookies.length}</b> cookies exhausted — zero gyms scraped.`,
-		``,
-		`Likely causes:`,
-		`• All cookies expired or banned`,
-		`• Proxy IP blocked by Revo`,
-		`• Portal structure changed`,
-		``,
-		`Run <code>bun run Scraper/generate_cookies.ts</code> to regenerate cookies.`,
-	].join("\n");
+	const details = [
+		`Login/token path: ${lastTokenPathResult}`,
+		`Cookies: ${zeroGyms}/${cookieCount} returned 0 gyms, ${networkErrors.length} failed at the network level`,
+		lastNetworkError ? `Last network error: ${lastNetworkError.error ?? "unknown"}` : null,
+		`Proxy: ${process.env.DOMAIN_NAME ?? "direct"}`,
+	]
+		.filter((line): line is string => line !== null)
+		.join("\n");
 
-	sendAlert("error", "All Cookies Failed — Zero Gyms", body);
+	void sendAlert({
+		key: "scrape.fetch",
+		severity: "error",
+		title: "Scrape returned no gym counts",
+		details,
+		error: lastNetworkError?.error,
+		hint: "bun run Scraper/test_cookies.ts, then bun run Scraper/generate_cookies.ts if the cookies are stale",
+	});
 };
 
 // ---- Cookie management ----
@@ -104,8 +112,17 @@ const refreshCookies = async () => {
 			throw new Error(`generate_cookies.ts exited with code ${proc.exitCode}`);
 		}
 		console.log(`${STAGE.COOKIES} ${STAGE.OK} Refreshed successfully`);
+		await resolveAlert("cookies.refresh");
 	} catch (e) {
 		console.error(`${STAGE.COOKIES} ${STAGE.FAIL} Refresh failed:`, e);
+		await sendAlert({
+			key: "cookies.refresh",
+			severity: "error",
+			title: "Cookie refresh failed",
+			details: "Triggered because Scraper/cookies.json was missing or older than 24h; the scrape continues with the stale cookies",
+			error: e,
+			hint: "run bun run Scraper/generate_cookies.ts on the host and check write access to Scraper/ inside the container",
+		});
 	}
 };
 
@@ -128,10 +145,13 @@ const checkAndRefreshCookies = async () => {
 const SCRAPE_URL = "https://revocentral.revofitness.com.au/portal/club-counter.php";
 const NP_API = "https://revofitness.netpulse.com";
 
-const loginAndFetchToken = async (): Promise<string | null> => {
+/** Non-cookie auth path: either an access token, or the reason it could not be obtained. */
+type TokenResult = { token: string } | { error: string };
+
+const loginAndFetchToken = async (): Promise<TokenResult> => {
 	const email = process.env.SCRAPE_EMAIL;
 	const password = process.env.SCRAPE_PASSWORD;
-	if (!email || !password) return null;
+	if (!email || !password) return { error: "SCRAPE_EMAIL/SCRAPE_PASSWORD not configured" };
 
 	try {
 		const loginRes = await fetch(`${NP_API}/np/exerciser/login`, {
@@ -145,16 +165,16 @@ const loginAndFetchToken = async (): Promise<string | null> => {
 			body: `password=${encodeURIComponent(password)}&username=${encodeURIComponent(email)}`,
 			signal: AbortSignal.timeout(15000),
 		});
-		if (!loginRes.ok) return null;
+		if (!loginRes.ok) return { error: `login rejected with HTTP ${loginRes.status}` };
 
 		const jsessionId = loginRes.headers.get("set-cookie");
-		if (!jsessionId) return null;
+		if (!jsessionId) return { error: "login response carried no Set-Cookie header" };
 		const cookieMatch = jsessionId.match(/JSESSIONID=([^;]+)/);
-		if (!cookieMatch) return null;
+		if (!cookieMatch) return { error: "login response had no JSESSIONID cookie" };
 
-		const loginData: any = await loginRes.json();
-		const uuid = loginData.uuid;
-		if (!uuid) return null;
+		const loginData = await loginRes.json();
+		const uuid = readString(loginData, "uuid");
+		if (!uuid) return { error: "login response contained no uuid" };
 
 		const tokenRes = await fetch(`${NP_API}/np/micro-web-app/v1.0/exercisers/${uuid}/tokens/BMA`, {
 			headers: {
@@ -165,12 +185,15 @@ const loginAndFetchToken = async (): Promise<string | null> => {
 			},
 			signal: AbortSignal.timeout(15000),
 		});
-		if (!tokenRes.ok) return null;
+		if (!tokenRes.ok) return { error: `BMA token request rejected with HTTP ${tokenRes.status}` };
 
-		const tokenData: any = await tokenRes.json();
-		return tokenData.accessToken || null;
-	} catch {
-		return null;
+		const tokenData = await tokenRes.json();
+		const accessToken = readString(tokenData, "accessToken");
+		if (!accessToken) return { error: "token response contained no accessToken" };
+
+		return { token: accessToken };
+	} catch (e) {
+		return { error: describeError(e) };
 	}
 };
 
@@ -189,9 +212,9 @@ const fetchClubCounterWithToken = async (token: string): Promise<{ $: cheerio.Ch
 		});
 		const duration_ms = Date.now() - startTime;
 		return { $: cheerio.load(response.data), duration_ms };
-	} catch (e: any) {
+	} catch (e) {
 		const duration_ms = Date.now() - startTime;
-		return { error: e.message, duration_ms };
+		return { error: describeError(e), duration_ms };
 	}
 };
 
@@ -216,9 +239,9 @@ const fetchPHPDataWithCookie = async (
 		});
 		const duration_ms = Date.now() - startTime;
 		return { $: cheerio.load(response.data), duration_ms };
-	} catch (e: any) {
+	} catch (e) {
 		const duration_ms = Date.now() - startTime;
-		return { error: e.message, duration_ms };
+		return { error: describeError(e), duration_ms };
 	}
 };
 
@@ -231,30 +254,39 @@ const fetchPHPData = async (): Promise<{
 } | null> => {
 	const sessionStart = Date.now();
 
-	const useLogin = process.env.SCRAPE_EMAIL && process.env.SCRAPE_PASSWORD;
+	const useLogin = Boolean(process.env.SCRAPE_EMAIL && process.env.SCRAPE_PASSWORD);
 	const useToken = process.env.SCRAPE_TOKEN;
+	const authNotes: string[] = [];
 
 	if (useLogin || useToken) {
 		let token: string | null = null;
 
 		if (useLogin) {
 			console.log(`${STAGE.FETCH} Logging in with SCRAPE_EMAIL...`);
-			token = await loginAndFetchToken();
-			if (token) {
+			const login = await loginAndFetchToken();
+			if ("token" in login) {
+				token = login.token;
+				authNotes.push("login ok");
 				console.log(`${STAGE.FETCH} ${STAGE.OK} Token obtained from login`);
-			} else if (useToken) {
-				console.log(`${STAGE.FETCH} ${STAGE.WARN} Login failed — using SCRAPE_TOKEN`);
-				token = useToken;
+			} else {
+				authNotes.push(`login failed — ${login.error}`);
+				console.log(`${STAGE.FETCH} ${STAGE.WARN} Login failed — ${login.error}`);
 			}
-		} else {
+		}
+
+		if (!token && useToken) {
 			token = useToken;
+			authNotes.push("used SCRAPE_TOKEN");
 		}
 
 		if (token) {
 			const result = await fetchClubCounterWithToken(token);
-			if (!("error" in result)) {
+			if ("error" in result) {
+				authNotes.push(`club-counter request failed — ${result.error}`);
+			} else {
 				const clubCounts = extractClubCounts(result.$);
 				if (clubCounts.length > 0) {
+					lastTokenPathResult = `${authNotes.join("; ")}; returned ${clubCounts.length} gyms`;
 					currentSession = {
 						startedAt: nowIso(),
 						cookiesAvailable: 0,
@@ -266,11 +298,16 @@ const fetchPHPData = async (): Promise<{
 						dbUpdates: 0,
 						duration_ms: 0,
 					};
+					await resolveAlert("scrape.fetch");
 					return { $: result.$, clubCounts, session: currentSession };
 				}
+				authNotes.push("club-counter returned 0 gyms — token rejected or portal markup changed");
 			}
 		}
-		console.log(`${STAGE.FETCH} ${STAGE.WARN} Token auth failed — falling back to cookies`);
+		lastTokenPathResult = authNotes.join("; ");
+		console.log(`${STAGE.FETCH} ${STAGE.WARN} Token auth failed (${lastTokenPathResult}) — falling back to cookies`);
+	} else {
+		lastTokenPathResult = "not attempted (SCRAPE_EMAIL/SCRAPE_PASSWORD/SCRAPE_TOKEN unset)";
 	}
 
 	await checkAndRefreshCookies();
@@ -279,6 +316,16 @@ const fetchPHPData = async (): Promise<{
 
 	if (cookies.length === 0) {
 		console.error(`${STAGE.FETCH} ${STAGE.FAIL} No cookies found in cookies.json`);
+		await sendAlert({
+			key: "scrape.fetch",
+			severity: "error",
+			title: "Scrape returned no gym counts",
+			details: [
+				`Login/token path: ${lastTokenPathResult}`,
+				"Scraper/cookies.json holds 0 cookies and no working token was available",
+			].join("\n"),
+			hint: "bun run Scraper/generate_cookies.ts",
+		});
 		return null;
 	}
 
@@ -345,12 +392,14 @@ const fetchPHPData = async (): Promise<{
 		}
 
 		console.log(`${STAGE.FETCH} ──────────────────────────────────────────────────`);
+		lastTokenPathResult = "not needed — a cookie returned counts";
+		await resolveAlert("scrape.fetch");
 		return { $: result.$, clubCounts, session: currentSession! };
 	}
 
 	console.log(`${STAGE.FETCH} ──────────────────────────────────────────────────`);
 	console.error(`${STAGE.FETCH} ${STAGE.FAIL} All ${cookies.length} cookies exhausted — no valid response`);
-	alertAllCookiesFailed(cookies);
+	await alertScrapeFailed(cookies.length);
 
 	// Print summary of all attempts
 	console.log(`${STAGE.FETCH} Attempt summary:`);
@@ -466,8 +515,17 @@ const insertGymStatsSql = async (
 		if (rows.length > 0) {
 			await sqlDb.insert(revoGymCount).values(rows);
 		}
+		await resolveAlert("mysql.write");
 	} catch (err) {
 		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym stats write failed:`, err);
+		await sendAlert({
+			key: "mysql.write",
+			severity: "warning",
+			title: "MySQL snapshot dual-write failed",
+			details: `Legacy Revo_Gym_Count rows for snapshot ${currentTime} were not written; PocketBase already holds the snapshot`,
+			error: err,
+			hint: "check DATABASE_URL and the MySQL host if the legacy database still matters",
+		});
 	}
 };
 
@@ -518,6 +576,14 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 		}
 	} catch (err) {
 		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym info write failed:`, err);
+		await sendAlert({
+			key: "mysql.write",
+			severity: "warning",
+			title: "MySQL gym metadata dual-write failed",
+			details: "Revo_Gyms upserts did not reach the legacy MySQL database",
+			error: err,
+			hint: "check DATABASE_URL and the MySQL host",
+		});
 	}
 };
 
@@ -633,26 +699,26 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 
 	let inserts = 0;
 
-	const insertOne = async (payload: Record<string, unknown>, label: string, retries = 2) => {
+	/** `null` on success, otherwise the error that made the write fail. */
+	type WriteFailure = { cause: unknown };
+
+	const insertOne = async (payload: Record<string, unknown>, label: string, retries = 2): Promise<WriteFailure | null> => {
 		let transientAttempts = 0;
 		let authAttempts = 0;
 
 		for (;;) {
 			try {
 				await pb.collection("Revo_Gym_Count").create(payload);
-				return true;
+				return null;
 			} catch (e: unknown) {
 				// The SDK re-wraps every transport/server failure as ClientResponseError.
-				const err = e instanceof ClientResponseError ? e : null;
-				const status = err?.status ?? 0;
-				const msg = err?.message ?? (e instanceof Error ? e.message : "unknown error");
-				const data = JSON.stringify(err?.data ?? {});
+				const status = e instanceof ClientResponseError ? e.status : 0;
 
 				// Revoked superuser token (see invalidateAdminAuth): re-authenticate
 				// and retry the write once instead of failing for the rest of the run.
 				if ((status === 401 || status === 403) && authAttempts === 0) {
 					authAttempts++;
-					console.warn(`${STAGE.DB} ${STAGE.WARN} ${label}: [${status}] ${data} — re-authenticating`);
+					console.warn(`${STAGE.DB} ${STAGE.WARN} ${label}: ${describeError(e)} — re-authenticating`);
 					invalidateAdminAuth();
 					await ensureAdminAuth();
 					continue;
@@ -664,8 +730,8 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 					continue;
 				}
 
-				console.error(`${STAGE.DB} ✖ Failed to insert ${label}: [${status}] ${msg} ${data}`);
-				return false;
+				console.error(`${STAGE.DB} ${STAGE.FAIL} Failed to insert ${label}: ${describeError(e)}`);
+				return { cause: e };
 			}
 		}
 	};
@@ -696,9 +762,12 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 	}
 
 	let attempted = 0;
+	const failures: { label: string; cause: unknown }[] = [];
 	for (const { payload, label } of payloads) {
 		attempted++;
-		if (await insertOne(payload, label)) inserts++;
+		const failure = await insertOne(payload, label);
+		if (failure) failures.push({ label, cause: failure.cause });
+		else inserts++;
 	}
 
 	const scrapedGymNames = new Set(gymData.map((g) => normalizeGymName(g.name)));
@@ -724,20 +793,42 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 		}));
 		for (const { payload, label } of missingPayloads) {
 			attempted++;
-			if (await insertOne(payload, label)) inserts++;
+			const failure = await insertOne(payload, label);
+			if (failure) failures.push({ label, cause: failure.cause });
+			else inserts++;
 		}
 	}
 
 	// A snapshot that silently writes nothing is worse than a failed run: the
 	// site keeps serving stale numbers with no signal. Make both cases loud.
-	const failed = attempted - inserts;
-	if (failed > 0) {
-		await sendAlert(
-			"error",
-			"Revo_Gym_Count inserts failed",
-			`${failed}/${attempted} rows rejected for snapshot ${currentTime}`,
-		);
+	if (failures.length > 0) {
+		const causes = [...new Set(failures.map((failure) => describeError(failure.cause)))];
+		const authRelated = causes.some((cause) => /superuser|unauthenticated|HTTP 40[13]/.test(cause));
+		const listed = failures.slice(0, 8).map((failure) => failure.label).join(", ");
+
+		await sendAlert({
+			key: "write.snapshot",
+			severity: "error",
+			title:
+				failures.length === attempted
+					? `Snapshot wrote no rows — all ${attempted} inserts rejected`
+					: `Snapshot partially written — ${failures.length}/${attempted} inserts rejected`,
+			details: [
+				`Snapshot ${currentTime}`,
+				`Failed gyms: ${listed}${failures.length > 8 ? ` +${failures.length - 8} more` : ""}`,
+				causes.length > 1 ? `Other causes: ${causes.slice(1, 3).join(" | ")}` : null,
+			]
+				.filter((line): line is string => line !== null)
+				.join("\n"),
+			error: failures[0].cause,
+			hint: authRelated
+				? "the collector re-authenticates on 401/403 by itself; if it keeps failing, verify POCKETBASE_ADMIN_EMAIL/POCKETBASE_ADMIN_PASSWORD"
+				: "inspect the run output in the admin dashboard logs",
+		});
+	} else {
+		await resolveAlert("write.snapshot");
 	}
+
 	if (attempted > 0 && inserts === 0) {
 		throw new Error(
 			`All ${attempted} Revo_Gym_Count inserts failed for snapshot ${currentTime}`,

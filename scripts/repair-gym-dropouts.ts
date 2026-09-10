@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pb, ensureAdminAuth } from "../src/utils/database";
+import { sendAlert } from "../src/utils/alerts";
 import {
 	analyzeGymDropouts,
 	buildTrendDaysFromLookup,
@@ -404,7 +405,15 @@ const main = async () => {
 	printSummary(summary, reportPath, options);
 };
 
-main().catch((error) => {
+main().catch(async (error) => {
 	console.error("[StatAudit] Fatal error:", error);
+	await sendAlert({
+		key: "audit.run",
+		severity: "error",
+		title: "Snapshot audit failed",
+		details: "Anomalous zero-count snapshots were not detected or repaired in this run",
+		error,
+		hint: "re-run scripts/repair-gym-dropouts.ts (dry run first) to see the full error",
+	});
 	process.exitCode = 1;
 });

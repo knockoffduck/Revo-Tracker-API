@@ -5,9 +5,27 @@ import { insertGymStats, parseHTML, updateGymInfo } from "./utils/parser";
 import { GymInfo } from "./utils/types";
 import { enrichGymData } from "./utils/details";
 import { pb, ensureAdminAuth } from "./utils/database";
+import { readString } from "./utils/tools";
+import { resolveAlert, sendAlert } from "./utils/alerts";
 import admin from "./admin";
 
 const app = new Hono();
+
+/** One-line summary of an endpoint's response body, for failure alerts. */
+const summarizeResponse = (body: string): string => {
+	const trimmed = body.trim();
+	if (!trimmed) return "empty response body";
+
+	try {
+		const parsed: unknown = JSON.parse(trimmed);
+		const message = readString(parsed, "error") ?? readString(parsed, "message");
+		if (message) return message;
+	} catch {
+		// not JSON — fall through to the raw text
+	}
+
+	return trimmed.length > 200 ? `${trimmed.slice(0, 199)}…` : trimmed;
+};
 
 // ── Rate limiter ───────────────────────────────────────────────────────────
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
@@ -107,15 +125,28 @@ const callEveryFiveMinutes = () => {
 
   setInterval(
     async () => {
+      const startedAt = Date.now();
       try {
         console.log(
           `[Scheduler] Executing ${ENDPOINT} at ${new Date().toISOString()}`,
         );
         const res = await fetch(ENDPOINT, { signal: AbortSignal.timeout(60_000) });
-        if (!res.ok) throw new Error(`Status ${res.status}`);
-        console.log(`[Scheduler] Success`);
+        const body = await res.text();
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} from ${ENDPOINT} — ${summarizeResponse(body)}`);
+        }
+        console.log(`[Scheduler] Success (${Date.now() - startedAt}ms)`);
+        await resolveAlert("scheduler.stats");
       } catch (err) {
         console.error(`[Scheduler] Error:`, err);
+        await sendAlert({
+          key: "scheduler.stats",
+          severity: "error",
+          title: "Scheduled snapshot run failed — site keeps serving the previous snapshot",
+          details: `Endpoint ${ENDPOINT}\nElapsed ${Date.now() - startedAt}ms`,
+          error: err,
+          hint: "the endpoint body above names the scrape/write failure; check the run output in the admin dashboard",
+        });
       }
     },
     5 * 60 * 1000,
@@ -137,10 +168,22 @@ const callEveryTwoDays = () => {
           `[Scheduler] Executing enrichment ${ENDPOINT} at ${new Date().toISOString()}`,
         );
         const res = await fetch(ENDPOINT);
-        if (!res.ok) throw new Error(`Status ${res.status}`);
+        const body = await res.text();
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} from ${ENDPOINT} — ${summarizeResponse(body)}`);
+        }
         console.log(`[Scheduler] Enrichment success`);
+        await resolveAlert("scheduler.enrichment");
       } catch (err) {
         console.error(`[Scheduler] Enrichment error:`, err);
+        await sendAlert({
+          key: "scheduler.enrichment",
+          severity: "warning",
+          title: "Scheduled gym metadata enrichment failed",
+          details: `Endpoint ${ENDPOINT}`,
+          error: err,
+          hint: "squat rack/address/area data goes stale until this succeeds",
+        });
       }
     },
     2 * 24 * 60 * 60 * 1000,
@@ -156,8 +199,17 @@ const callArchiveWeekly = () => {
       const { archiveGymCount } = await import("../scripts/archive-gym-count");
       const result = await archiveGymCount(ARCHIVE_RETENTION_DAYS, false);
       console.log(`[Scheduler] Archive complete: ${result.deleted}/${result.total} rows removed`);
+      await resolveAlert("archive.run");
     } catch (err) {
       console.error(`[Scheduler] Archive error:`, err);
+      await sendAlert({
+        key: "archive.run",
+        severity: "error",
+        title: "90-day snapshot archive failed",
+        details: `Retention ${ARCHIVE_RETENTION_DAYS} days; Revo_Gym_Count keeps growing until this succeeds`,
+        error: err,
+        hint: "run bun run scripts/archive-gym-count.ts on the host to see the full error",
+      });
     }
   };
 
@@ -221,6 +273,11 @@ app.get("/gyms/stats/update", async (c) => {
       const rawGymData = await parseHTML();
       if (!isGymArray(rawGymData)) {
         throw new Error("Data is not of type Gym[]");
+      }
+      // An empty scrape writes nothing but would otherwise report success,
+      // hiding a dead scrape behind a 200.
+      if (rawGymData.length === 0) {
+        throw new Error("Scrape returned 0 gyms — no snapshot written");
       }
       await insertGymStats(rawGymData);
       return rawGymData;
@@ -299,6 +356,14 @@ app.get("/gyms/trends/generate", async (c) => {
       })
       .catch((err) => {
         console.error("[API] Trend generation crashed:", err);
+        void sendAlert({
+          key: "trends.run",
+          severity: "error",
+          title: "Trend generation crashed",
+          details: "Popular-times data keeps serving the previous cache",
+          error: err,
+          hint: "re-run /gyms/trends/generate after fixing the cause",
+        });
         isTrendGenerationRunning = false;
       });
 

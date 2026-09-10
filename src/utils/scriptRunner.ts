@@ -9,6 +9,7 @@
  */
 
 import { progressBus } from "./progress";
+import { resolveAlert, sendAlert } from "./alerts";
 
 const STAGE_REGEX = /^\s*\[(FETCH|PARSE|DB|COOKIES|Details|TrendAgent|StatAudit)\]\s*(.*)$/;
 
@@ -35,6 +36,13 @@ const SCRIPT_PATHS: Record<ScriptId, string> = {
 	"generate-cookies": "Scraper/generate_cookies.ts",
 	"test-cookies": "Scraper/test_cookies.ts",
 	audit: "scripts/repair-gym-dropouts.ts",
+};
+
+/** What stays broken when each script fails, so the alert points somewhere useful. */
+const SCRIPT_HINT: Record<ScriptId, string> = {
+	"generate-cookies": "Scraper/cookies.json keeps the old cookies until this succeeds",
+	"test-cookies": "run generate-cookies afterwards to replace the failing cookies",
+	audit: "suspect zero-count snapshots stay unrepaired until the audit runs",
 };
 
 function buildArgs(script: ScriptId, options: ScriptOptions): string[] {
@@ -142,6 +150,7 @@ export async function runScript(script: ScriptId, options: ScriptOptions = {}): 
 			message: `Script completed (exit 0)`,
 		});
 		progressBus.emit({ type: "progress", phase: "done", percent: 100 });
+		await resolveAlert(`script.${script}`);
 		// Try to read the most recent report file for audit scripts
 		if (script === "audit") {
 			const report = await tryReadLatestReport();
@@ -157,6 +166,23 @@ export async function runScript(script: ScriptId, options: ScriptOptions = {}): 
 		});
 		progressBus.emit({ type: "error", message: `Script failed (exit ${exitCode})` });
 		progressBus.emit({ type: "result", data: { exitCode, stderrTail: stderr.slice(-4000) } });
+
+		const lastErrorLine = stderr
+			.split("\n")
+			.map((line) => stripAnsi(line).trim())
+			.filter((line) => line.length > 0)
+			.at(-1);
+
+		await sendAlert({
+			key: `script.${script}`,
+			severity: "error",
+			title: `Admin script failed: ${script} (exit ${exitCode})`,
+			details: [
+				`Command: bun ${args.join(" ")}`,
+				lastErrorLine ? `Last stderr line: ${lastErrorLine}` : "No stderr output; see stdout tail in the dashboard",
+			].join("\n"),
+			hint: SCRIPT_HINT[script],
+		});
 	}
 
 	progressBus.emit({ type: "done" });

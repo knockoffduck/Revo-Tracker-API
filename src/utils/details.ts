@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { axiosGetWithProxyFallback } from "./proxy";
+import { describeError, resolveAlert, sendAlert } from "./alerts";
 
 const getSlug = (name: string): string => {
 	// Special case for OConnor -> oconnor (removing CamelCase/apostrophe implication issues if any, but based on gyms.json it is "OConnor")
@@ -24,6 +25,8 @@ export type GymDetails = {
 	postcode: number | null;
 	state: string | null;
 	areaSize: number | null;
+	/** Set when the gym's detail page could not be fetched or parsed. */
+	failure?: string;
 };
 
 const extractAddress = ($: cheerio.CheerioAPI): { address: string; postcode: number; state: string | null } | null => {
@@ -120,7 +123,8 @@ export const getGymDetails = async (gymName: string): Promise<GymDetails> => {
 
 		return result;
 	} catch (error) {
-		console.warn(`[Details] Failed: ${gymName} — ${error instanceof Error ? error.message : error}`);
+		result.failure = describeError(error);
+		console.warn(`[Details] Failed: ${gymName} — ${result.failure}`);
 		return result;
 	}
 };
@@ -134,6 +138,8 @@ export const enrichGymData = async (gyms: GymInfo[]): Promise<GymInfo[]> => {
 	console.log(`[Details] Enriching ${gyms.length} gyms with detail page data...`);
 
 	const enrichedGyms: GymInfo[] = [];
+	const failedGyms: string[] = [];
+	let emptyGyms = 0;
 	const chunkSize = 5;
 
 	for (let i = 0; i < gyms.length; i += chunkSize) {
@@ -162,6 +168,12 @@ export const enrichGymData = async (gyms: GymInfo[]): Promise<GymInfo[]> => {
 				enriched.state = details.state;
 			}
 
+			if (details.failure) {
+				failedGyms.push(`${gym.name} — ${details.failure}`);
+			} else if (parts.length === 0) {
+				emptyGyms++;
+			}
+
 			if (parts.length > 0) {
 				console.log(`[Details]   ✔ ${gym.name}: ${parts.join(" | ")}`);
 			} else {
@@ -177,6 +189,24 @@ export const enrichGymData = async (gyms: GymInfo[]): Promise<GymInfo[]> => {
 		if (i + chunkSize < gyms.length) {
 			await new Promise((resolve) => setTimeout(resolve, 500));
 		}
+	}
+
+	if (failedGyms.length > 0) {
+		await sendAlert({
+			key: "details.enrich",
+			severity: "warning",
+			title: `Gym detail enrichment failed for ${failedGyms.length} of ${gyms.length} gyms`,
+			details: [
+				...failedGyms.slice(0, 5),
+				failedGyms.length > 5 ? `… +${failedGyms.length - 5} more` : null,
+				emptyGyms > 0 ? `${emptyGyms} gym page(s) loaded but yielded no squat rack/size/address fields` : null,
+			]
+				.filter((line): line is string => line !== null)
+				.join("\n"),
+			hint: "those gyms keep their previously scraped size/address/squat racks",
+		});
+	} else {
+		await resolveAlert("details.enrich");
 	}
 
 	console.log(`[Details] Enrichment complete.`);

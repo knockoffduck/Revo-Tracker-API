@@ -14,6 +14,44 @@
 import { pb, ensureAdminAuth } from "../utils/database";
 import { sqlDb } from "../db/database";
 import { gymTrendCache } from "../db/schema";
+import { resolveAlert, sendAlert } from "../utils/alerts";
+
+/** Outcome of a trend run, as returned by runTrendAgent / generateTrendsForGyms. */
+export interface TrendRunResult {
+	success: boolean;
+	gymsProcessed: number;
+	errors: string[];
+}
+
+/**
+ * Report one trend run. Gyms with no history in the lookback window are not
+ * failures — only real processing errors alert, so the alert stays trustworthy.
+ */
+const reportTrendRun = async (label: string, result: TrendRunResult, cause?: unknown): Promise<void> => {
+	const noHistory = result.errors.filter((error) => error.startsWith("No data for "));
+	const failures = result.errors.filter((error) => !error.startsWith("No data for "));
+
+	if (failures.length === 0) {
+		await resolveAlert("trends.run");
+		return;
+	}
+
+	await sendAlert({
+		key: "trends.run",
+		severity: "error",
+		title: `Trend generation failed — ${failures.length} of ${result.gymsProcessed} gyms`,
+		details: [
+			`Run: ${label}`,
+			...failures.slice(0, 5).map((error) => `• ${error}`),
+			failures.length > 5 ? `… +${failures.length - 5} more` : null,
+			noHistory.length > 0 ? `${noHistory.length} gym(s) had no history in the lookback window` : null,
+		]
+			.filter((line): line is string => line !== null)
+			.join("\n"),
+		error: cause,
+		hint: "affected gyms keep serving their previous popular-times cache",
+	});
+};
 
 // Type definitions
 export interface TimeSlotAverage {
@@ -319,10 +357,14 @@ export const generateTrendsForGyms = async (
 		}
 
 		console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gym(s).`);
-		return { success: errors.length === 0, gymsProcessed, errors };
+		const result: TrendRunResult = { success: errors.length === 0, gymsProcessed, errors };
+		await reportTrendRun(`selected gyms (${ids.length})`, result);
+		return result;
 	} catch (error) {
 		console.error("[TrendAgent] Fatal error:", error);
-		return { success: false, gymsProcessed, errors: [String(error)] };
+		const result: TrendRunResult = { success: false, gymsProcessed, errors: [String(error)] };
+		await reportTrendRun(`selected gyms (${ids.length})`, result, error);
+		return result;
 	}
 };
 
@@ -358,10 +400,14 @@ export const runTrendAgent = async (
 		}
 
 		console.log(`[TrendAgent] Completed. Processed ${gymsProcessed} gyms.`);
-		return { success: errors.length === 0, gymsProcessed, errors };
+		const result: TrendRunResult = { success: errors.length === 0, gymsProcessed, errors };
+		await reportTrendRun(`all gyms (lookback ${lookbackDays}d)`, result);
+		return result;
 	} catch (error) {
 		console.error("[TrendAgent] Fatal error:", error);
-		return { success: false, gymsProcessed, errors: [String(error)] };
+		const result: TrendRunResult = { success: false, gymsProcessed, errors: [String(error)] };
+		await reportTrendRun(`all gyms (lookback ${lookbackDays}d)`, result, error);
+		return result;
 	}
 };
 
