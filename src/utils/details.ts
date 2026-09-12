@@ -30,7 +30,7 @@ export type GymDetails = {
 };
 
 const extractAddress = ($: cheerio.CheerioAPI): { address: string; postcode: number; state: string | null } | null => {
-	let best: { address: string; postcode: number; state: string | null; score: number } | null = null;
+	const candidates: { address: string; postcode: number; state: string | null; score: number }[] = [];
 
 	$("p, li, span, div").each((_, el) => {
 		const text = $(el).text().replace(/\s+/g, " ").trim();
@@ -63,10 +63,14 @@ const extractAddress = ($: cheerio.CheerioAPI): { address: string; postcode: num
 			score += 3;
 		}
 
-		if (!best || score > best.score) {
-			best = { address: text, postcode, state, score };
-		}
+		candidates.push({ address: text, postcode, state, score });
 	});
+
+	// Strictly greater keeps the first of equal-scoring candidates, as before.
+	const best = candidates.reduce<typeof candidates[number] | null>(
+		(top, candidate) => (top === null || candidate.score > top.score ? candidate : top),
+		null,
+	);
 
 	return best ? { address: best.address, postcode: best.postcode, state: best.state } : null;
 };

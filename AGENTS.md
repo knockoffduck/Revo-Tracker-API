@@ -28,7 +28,7 @@
     proxy.ts            # HTTP proxy with fallback logic (Webshare)
     tools.ts            # simpleIntegerHash() — deterministic gym ID from name+postcode
     gymDirectory.ts     # Open gyms from revofitness.com.au/gyms (cached 24h in logs/open_gyms.json)
-    gymFilter.ts        # normalizeGymName(), filterTrackableClubs(), timezoneForState()
+    gymFilter.ts        # normalizeGymName(), filterTrackableClubs(), resolveTimezone()
     gymVerification.ts  # detailPageShowsRealGym()/verifyRealGym() — is this a real gym, and where?
     handlers.ts         # API response helpers (handleSuccess / handleError)
     types.ts            # GymInfo type definition
@@ -50,7 +50,7 @@
   archive-gym-count.ts   # Retention archiver (see §6)
   purge-non-gyms.ts      # Removes phantom/duplicate gyms from Revo_Gyms (see §6)
 /tests
-  *.test.ts             # Bun test suite (93 tests)
+  *.test.ts             # Bun test suite (98 tests)
 /logs
   updated_stats.json     # Last 5 scrape sessions (rolling)
   open_gyms.json         # Cached gym directory (24h TTL, written by gymDirectory.ts)
@@ -76,7 +76,7 @@ Data is stored in a PocketBase instance. The active collections are `Revo_Gyms`,
 | address | text | Street address |
 | postcode | number | |
 | active | bool | true = active |
-| timezone | text | IANA tz e.g. `Australia/Perth`; for a gym registered automatically it comes from its state (`timezoneForState()`), otherwise Perth |
+| timezone | text | IANA tz derived from the gym's state (`resolveTimezone()`); a record still on `Australia/Perth` is re-derived once its state is known |
 | longitude/latitude | number | Optional geocoding |
 | Squat_Racks | number | Scraped from gym detail page |
 | last_updated | date | |
@@ -145,9 +145,10 @@ All responses follow `{ success: true, data: ... }` or `{ success: false, error:
 **The gym's own detail page** — `https://revofitness.com.au/gyms/<slug>/`, scraped by `details.ts` (`gymVerification.ts`).
 
 - Real when the page states a floor area, or a street address with a postcode. Coming-soon sites and retired clubs have no page at all; squat racks alone do not count (a closed gym's page keeps them — Shenton Park still shows 11)
-- The page for an *unlisted* gym whose address matches a tracked gym is an alias of it, not a new gym
+- A club whose page shows an address that any known record already claims — **active or deactivated** — is an alias of that gym, not a new gym: the portal keeps `Knox` for `Knoxfield`, and a deactivated record must still prevent its alias from being registered (the log names both: `Knox → Knoxfield`)
 - Only fetched for clubs without a record yet, five at a time
 - This is what picks up a gym that has opened since the directory was last fetched: the club counter reports it, its page proves it, and `insertGymStats()` registers it
+- A club whose name matches a *deactivated* record reactivates that record under its existing id rather than creating a second one (`updateGymInfo()` reads `Revo_Gyms` unfiltered for this)
 
 ### Cookie Rotation
 
@@ -284,7 +285,8 @@ Deletes snapshots older than the retention window (`ARCHIVE_RETENTION_DAYS`, def
 bun install              # Install dependencies
 bun run dev              # Start dev server (port 3001, hot reload)
 bun run start            # Start production server
-bun test                 # Run all tests (93 tests)
+bun test                 # Run all tests (98 tests)
+bunx typescript --noEmit # Type-check (tsconfig: target esnext, skipLibCheck)
 bun run audit:dropouts   # Run statAudit (dry-run by default)
 bun run archive:gym-count # Archive snapshots past the retention window
 bun run purge:non-gyms   # Remove phantom/duplicate gyms (dry-run by default)

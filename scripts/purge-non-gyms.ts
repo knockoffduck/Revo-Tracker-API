@@ -22,7 +22,7 @@ import { pb, ensureAdminAuth } from "../src/utils/database";
 import { sendAlert } from "../src/utils/alerts";
 import { getOpenGymNames } from "../src/utils/gymDirectory";
 import { gymRecordScore, normalizeGymName } from "../src/utils/gymFilter";
-import { locationKey, locationsOf, verifyRealGym } from "../src/utils/gymVerification";
+import { locationKey, locationOwners, verifyRealGym } from "../src/utils/gymVerification";
 
 const GYM_COLLECTION = "Revo_Gyms";
 const COUNT_COLLECTION = "Revo_Gym_Count";
@@ -87,7 +87,9 @@ const findStaleGyms = async (gyms: GymRecord[], openGyms: Set<string>): Promise<
 		if (!best || gymRecordScore(gym) > gymRecordScore(best)) bestByName.set(key, gym);
 	}
 
-	const listedLocations = locationsOf(gyms.filter((gym) => openGyms.has(normalizeGymName(gym.name))));
+	const listedLocations = locationOwners(
+		gyms.filter((gym) => openGyms.has(normalizeGymName(gym.name))),
+	);
 	const stale: StaleGym[] = [];
 
 	for (const gym of gyms) {
@@ -100,10 +102,12 @@ const findStaleGyms = async (gyms: GymRecord[], openGyms: Set<string>): Promise<
 		}
 
 		const details = await verifyRealGym(gym.name);
+		const location = details ? locationKey(details) : null;
+		const owner = location ? listedLocations.get(location) : undefined;
 		if (!details) {
 			stale.push({ gym, reason: "not in the gym directory and has no gym detail page" });
-		} else if (locationKey(details) && listedLocations.has(locationKey(details)!)) {
-			stale.push({ gym, reason: "same address as a gym that is open today" });
+		} else if (owner) {
+			stale.push({ gym, reason: `same address as ${owner}, which is open today` });
 		} else {
 			console.log(
 				`[Purge]   Keeping ${gym.name} (${gym.id}) — its detail page shows a real gym the directory has not caught up with; deactivate it in the dashboard if it has actually closed`,

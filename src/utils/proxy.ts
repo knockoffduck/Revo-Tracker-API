@@ -2,7 +2,7 @@ import axios, { type AxiosRequestConfig, type AxiosResponse } from "axios";
 import { HttpsProxyAgent } from "https-proxy-agent";
 
 type ProxyConfig = {
-	httpsAgent?: HttpsProxyAgent;
+	httpsAgent?: HttpsProxyAgent<string>;
 	proxyLabel: string;
 };
 

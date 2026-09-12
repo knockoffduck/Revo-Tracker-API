@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { GymDetails } from "../src/utils/details";
-import { detailPageShowsRealGym, locationKey, locationsOf } from "../src/utils/gymVerification";
+import { detailPageShowsRealGym, locationKey, locationOwners } from "../src/utils/gymVerification";
 
 const detailPage = (fields: Partial<GymDetails>): GymDetails => ({
     squatRacks: null,
@@ -68,15 +68,18 @@ describe("locationKey", () => {
     });
 });
 
-describe("locationsOf", () => {
-    test("collects the addresses of tracked gyms", () => {
-        const locations = locationsOf([
-            { address: "1 Page Rd, Kelmscott WA 6111" },
-            { address: "Pending Update" },
-            { address: "800 Ranford Road, Forrestdale WA 6112" },
+describe("locationOwners", () => {
+    test("maps each tracked gym's address to the gym that owns it", () => {
+        const owners = locationOwners([
+            { name: "Kelmscott", address: "1 Page Rd, Kelmscott WA 6111" },
+            { name: "Forrestdale", address: "800 Ranford Road, Forrestdale WA 6112" },
+            { name: "No address yet", address: "Pending Update" },
         ]);
 
-        expect(locations.size).toBe(2);
-        expect(locations.has(locationKey({ address: "800 Ranford Road, Forrestdale WA 6112" })!)).toBe(true);
+        expect(owners.size).toBe(2);
+        expect(owners.get(locationKey({ address: "800 Ranford Road, Forrestdale WA 6112" })!)).toBe(
+            "Forrestdale",
+        );
+        expect(owners.get(locationKey({ address: "1 Page Rd, Kelmscott WA 6111" })!)).toBe("Kelmscott");
     });
 });

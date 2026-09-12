@@ -6,9 +6,9 @@ import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from ".
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { readString, simpleIntegerHash } from "./tools";
-import { normalizeGymName, filterTrackableClubs, gymRecordScore, timezoneForState } from "./gymFilter";
+import { normalizeGymName, filterTrackableClubs, gymRecordScore, resolveTimezone } from "./gymFilter";
 import { getOpenGymNames } from "./gymDirectory";
-import { detailPageShowsRealGym, locationsOf, locationKey } from "./gymVerification";
+import { detailPageShowsRealGym, locationOwners, locationKey } from "./gymVerification";
 import { getGymDetails, type GymDetails } from "./details";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
@@ -535,7 +535,7 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 				areaSize: gym.size || existingGym?.area_size || 0,
 				lastUpdated: sqlTime,
 				active: 1,
-				timezone: existingGym?.timezone ?? timezoneForState(gym.state ?? existingGym?.state),
+				timezone: resolveTimezone(existingGym?.timezone, gym.state ?? existingGym?.state),
 				longitude: existingGym?.longitude ?? 0,
 				latitude: existingGym?.latitude ?? 0,
 				squatRacks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,
@@ -656,10 +656,13 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const parseDuration = Date.now() - parseStart;
 
 	await ensureAdminAuth();
-	const existingGyms = await pb.collection("Revo_Gyms").getFullList<PbGym>({
-		filter: "active=true",
+	// One read, two uses: only active records may supply metadata for a scraped
+	// club, while every record — including a deactivated one — claims its location,
+	// so the alias club of a closed gym cannot be registered as a new gym.
+	const allGyms = await pb.collection("Revo_Gyms").getFullList<PbGym>({
 		batch: 200,
 	});
+	const existingGyms = allGyms.filter((gym) => gym.active);
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
 
@@ -674,7 +677,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	});
 	const listedNames = new Set(tracked.map((club) => normalizeGymName(club.name)));
 	const detailsByName = await fetchDetailsForUnregisteredClubs(clubCounts, gymsByNormalizedName);
-	const claimedLocations = locationsOf(existingGyms);
+	const claimedLocations = locationOwners(allGyms);
 
 	const newGyms: string[] = [];
 	const notGyms: string[] = [];
@@ -695,10 +698,11 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 		}
 
 		const location = details ? locationKey(details) : null;
-		if (!metadata && location && claimedLocations.has(location)) {
+		const owner = !metadata && location ? claimedLocations.get(location) : undefined;
+		if (owner) {
 			// The club points at a gym that is already tracked — an alias such as
 			// "Knox" for "Knoxfield" shares the address.
-			aliases.push(scrapedName);
+			aliases.push(`${scrapedName} → ${owner}`);
 			continue;
 		}
 
@@ -719,7 +723,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 			continue;
 		}
 
-		const size = (isRealGym ? details!.areaSize : null) ?? 0;
+		const size = details?.areaSize ?? 0;
 		const count = memberCount > 0 ? memberCount : 0;
 		const { memberRatio, percentage } = calculateGymRatios(size, count);
 		if (isRealGym) newGyms.push(scrapedName);
@@ -975,10 +979,10 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 export const updateGymInfo = async (gymData: GymInfo[]) => {
 	const currentTime = toPbDate(new Date());
 	await ensureAdminAuth();
-	const gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
-		filter: "active=true",
-		batch: 200,
-	});
+	// Deliberately unrestricted: a gym whose club reappears after it was
+	// deactivated must be updated back to active under its existing record, not
+	// created a second time under a hash id.
+	const gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({ batch: 200 });
 	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
 
 	let updates = 0;
@@ -995,7 +999,7 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			area_size: gym.size || existingGym?.area_size || 0,
 			last_updated: currentTime,
 			active: true,
-			timezone: existingGym?.timezone ?? timezoneForState(gym.state ?? existingGym?.state),
+			timezone: resolveTimezone(existingGym?.timezone, gym.state ?? existingGym?.state),
 			longitude: existingGym?.longitude ?? 0,
 			latitude: existingGym?.latitude ?? 0,
 			Squat_Racks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,

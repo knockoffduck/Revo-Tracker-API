@@ -42,11 +42,11 @@ export const gymRecordScore = (gym: GymRecordLike): number => {
 };
 
 /**
- * IANA timezone per Australian state, for a gym registered automatically from
- * its detail page — its local timezone decides which day and hour slot a
- * reading belongs to (trends, local dates), so a new South Australian gym must
- * not inherit the Perth default.
+ * Fallback timezone. Every Revo gym is in Australia, and Perth covers the case
+ * where a detail page did not state which state the gym is in.
  */
+export const DEFAULT_TIMEZONE = "Australia/Perth";
+
 const TIMEZONE_BY_STATE: Record<string, string> = {
 	WA: "Australia/Perth",
 	NT: "Australia/Darwin",
@@ -59,7 +59,22 @@ const TIMEZONE_BY_STATE: Record<string, string> = {
 };
 
 export const timezoneForState = (state: string | null | undefined): string =>
-	TIMEZONE_BY_STATE[(state ?? "").trim().toUpperCase()] ?? "Australia/Perth";
+	TIMEZONE_BY_STATE[(state ?? "").trim().toUpperCase()] ?? DEFAULT_TIMEZONE;
+
+/**
+ * The timezone to store for a gym: one that is already set stays, except while
+ * it is still the default. A gym registered from a detail page that did not
+ * state its state therefore keeps the default until a later run resolves the
+ * state, instead of being stuck on Perth forever — its timezone decides which
+ * day and hour slot every reading belongs to.
+ */
+export const resolveTimezone = (
+	current: string | null | undefined,
+	state: string | null | undefined,
+): string => {
+	const existing = (current ?? "").trim();
+	return existing && existing !== DEFAULT_TIMEZONE ? existing : timezoneForState(state);
+};
 
 export type ClubSources = {
 	/** Names of the gyms already tracked in Revo_Gyms. */

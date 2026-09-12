@@ -14,8 +14,8 @@
 
 import { getGymDetails, type GymDetails } from "./details";
 
-/** The address fields a gym record and a detail page have in common. */
-export type AddressLike = { address?: string | null; postcode?: number | null };
+/** The gym fields a record and a detail page have in common. */
+export type AddressLike = { name?: string | null; address?: string | null; postcode?: number | null };
 
 /**
  * Does this detail page describe an open gym?
@@ -44,14 +44,20 @@ export const locationKey = (gym: AddressLike): string | null => {
 	return address.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 };
 
-/** The set of locations already represented by tracked gyms. */
-export const locationsOf = (gyms: AddressLike[]): Set<string> => {
-	const keys = new Set<string>();
+/**
+ * Which tracked gym owns each known location, keyed by `locationKey`. Used to
+ * recognise an alias club: the portal keeps one for a gym a relocation replaced
+ * (`Knox` for `Knoxfield`), and its detail page points at the tracked gym's own
+ * address. Deactivated records count as owners too — otherwise a closed gym's
+ * alias page would be registered as a brand new gym.
+ */
+export const locationOwners = (gyms: AddressLike[]): Map<string, string> => {
+	const owners = new Map<string, string>();
 	for (const gym of gyms) {
 		const key = locationKey(gym);
-		if (key) keys.add(key);
+		if (key && !owners.has(key)) owners.set(key, gym.name ?? key);
 	}
-	return keys;
+	return owners;
 };
 
 /**

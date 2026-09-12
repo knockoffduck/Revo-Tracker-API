@@ -185,15 +185,18 @@ describe("API Endpoint Tests", () => {
 
         try {
             // First request: mock axios hangs forever → the scrape never settles.
-            const realGet = (await import("axios")).default.get as any;
-            (await import("axios")).default.get = mock(async () => new Promise(() => {}));
+            const axiosModule = (await import("axios")).default;
+            const realGet = axiosModule.get;
+            // Type-only cast: axios's generic signature cannot be satisfied by a mock
+            // that returns a promise which never settles.
+            axiosModule.get = mock(async () => Promise.withResolvers<never>().promise) as unknown as typeof axiosModule.get;
 
             const req1 = new Request("http://localhost/gyms/stats/update");
             const res1 = await app.fetch(req1);
             expect(res1.status).toBe(500);
 
             // Restore the axios mock so the follow-up scrape succeeds.
-            (await import("axios")).default.get = realGet;
+            axiosModule.get = realGet;
 
             // Second request must NOT be 409 — the deadline must have cleared the lock.
             const req2 = new Request("http://localhost/gyms/stats/update");

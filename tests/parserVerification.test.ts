@@ -50,6 +50,7 @@ mock.module("../src/db/database", () => ({ sqlDb: null }));
 // PocketBase stand-in: knows which gyms exist, records what the scrape writes.
 let gymRecords: Record<string, unknown>[] = [];
 let gymCreates: Record<string, unknown>[] = [];
+let gymUpdates: { id: string; payload: Record<string, unknown> }[] = [];
 let countCreates: Record<string, unknown>[] = [];
 
 mock.module("../src/utils/database", () => {
@@ -58,7 +59,14 @@ mock.module("../src/utils/database", () => {
     return {
         pb: {
             collection: (name: string) => ({
-                getFullList: mock(async () => (name === "Revo_Gyms" ? gymRecords : [])),
+                // Honour the one filter the code relies on to tell a deactivated gym
+                // from the ones being tracked.
+                getFullList: mock(async (options?: { filter?: string }) => {
+                    if (name !== "Revo_Gyms") return [];
+                    return (options?.filter ?? "").includes("active=true")
+                        ? gymRecords.filter((record) => record.active)
+                        : gymRecords;
+                }),
                 getList: mock(async () => ({ items: [] })),
                 create: mock(async (payload: Record<string, unknown>) => {
                     if (name === "Revo_Gyms") {
@@ -72,6 +80,7 @@ mock.module("../src/utils/database", () => {
                 update: mock(async (id: string, payload: Record<string, unknown>) => {
                     if (name !== "Revo_Gyms" || !gymRecords.some((record) => record.id === id)) throw notFound();
                     const record = gymRecords.find((candidate) => candidate.id === id)!;
+                    gymUpdates.push({ id, payload });
                     Object.assign(record, payload);
                     return {};
                 }),
@@ -101,6 +110,7 @@ const knoxfieldRecord = {
 beforeEach(() => {
     gymRecords = [knoxfieldRecord];
     gymCreates = [];
+    gymUpdates = [];
     countCreates = [];
 });
 
@@ -151,5 +161,22 @@ describe("insertGymStats — registering a newly opened gym", () => {
         // The snapshot's new row points at the record that was just created.
         const snapshot = countCreates.find((row) => row.gym_name === "Fitzroy North");
         expect(snapshot?.gym_id_rel).toBe(created.id);
+    });
+
+    test("reactivates the existing record when a deactivated gym's club returns", async () => {
+        gymRecords = [{ ...knoxfieldRecord, id: "fitzroy-north", name: "Fitzroy North", active: false }];
+
+        const { insertGymStats, parseHTML } = await import("../src/utils/parser");
+        const gyms = await parseHTML();
+        await insertGymStats(gyms);
+
+        // No second record: the existing one is brought back under its own id.
+        expect(gymCreates).toEqual([]);
+        expect(gymUpdates.map((update) => update.id)).toEqual(["fitzroy-north"]);
+        expect(gymUpdates[0].payload.active).toBe(true);
+        expect(gymRecords).toHaveLength(1);
+
+        const snapshot = countCreates.find((row) => row.gym_name === "Fitzroy North");
+        expect(snapshot?.gym_id_rel).toBe("fitzroy-north");
     });
 });

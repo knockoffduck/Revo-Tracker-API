@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { filterTrackableClubs } from "../src/utils/gymFilter";
+import { DEFAULT_TIMEZONE, filterTrackableClubs, resolveTimezone, timezoneForState } from "../src/utils/gymFilter";
 
 // Gym names Revo_Gyms already holds, and the names the public gym directory lists.
 const knownGymNames = ["OConnor", "Nunawading", "Knoxfield"];
@@ -56,5 +56,32 @@ describe("filterTrackableClubs", () => {
 
         expect(tracked).toEqual([]);
         expect(skipped.map((gym) => gym.name)).toEqual(["Cockburn2"]);
+    });
+});
+
+describe("timezoneForState", () => {
+    test("maps each state to its own zone, case-insensitively", () => {
+        expect(timezoneForState("VIC")).toBe("Australia/Melbourne");
+        expect(timezoneForState("sa")).toBe("Australia/Adelaide");
+        expect(timezoneForState("NSW")).toBe("Australia/Sydney");
+        expect(timezoneForState("")).toBe(DEFAULT_TIMEZONE);
+    });
+});
+
+describe("resolveTimezone", () => {
+    test("moves a record off the default once its state is known", () => {
+        // The shape of every record that predates an automatic registration, and of
+        // a gym first seen on a detail page that carried no state.
+        expect(resolveTimezone(DEFAULT_TIMEZONE, "VIC")).toBe("Australia/Melbourne");
+        expect(resolveTimezone("", "SA")).toBe("Australia/Adelaide");
+    });
+
+    test("keeps a timezone that was already pinned down", () => {
+        expect(resolveTimezone("Australia/Sydney", "VIC")).toBe("Australia/Sydney");
+    });
+
+    test("stays on the default while the state is unknown", () => {
+        expect(resolveTimezone(DEFAULT_TIMEZONE, "Unknown")).toBe(DEFAULT_TIMEZONE);
+        expect(resolveTimezone(undefined, undefined)).toBe(DEFAULT_TIMEZONE);
     });
 });
