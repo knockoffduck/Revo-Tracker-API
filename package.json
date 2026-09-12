@@ -5,7 +5,8 @@
     "start": "bun run src/index.ts",
     "test": "bun test",
     "audit:dropouts": "bun run scripts/repair-gym-dropouts.ts",
-    "archive:gym-count": "bun run scripts/archive-gym-count.ts"
+    "archive:gym-count": "bun run scripts/archive-gym-count.ts",
+    "purge:non-gyms": "bun run scripts/purge-non-gyms.ts"
   },
   "dependencies": {
     "axios": "^1.13.4",

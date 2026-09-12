@@ -383,10 +383,11 @@ export const runTrendAgent = async (
 		// Step 1: Fetch list of all gyms
 		await ensureAdminAuth();
 		const allGyms = await pb.collection("Revo_Gyms").getFullList<GymInfo>({
+			filter: "active=true",
 			batch: 200,
 		});
 
-		console.log(`[TrendAgent] Found ${allGyms.length} gyms to process.`);
+		console.log(`[TrendAgent] Found ${allGyms.length} active gyms to process.`);
 
 		// Step 2: Iterate and process each gym
 		for (const gym of allGyms) {

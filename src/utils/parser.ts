@@ -6,6 +6,8 @@ import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from ".
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { readString, simpleIntegerHash } from "./tools";
+import { normalizeGymName, filterTrackableClubs, gymRecordScore } from "./gymFilter";
+import { getOpenGymNames } from "./gymDirectory";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
 import { describeError, resolveAlert, sendAlert } from "./alerts";
@@ -415,15 +417,6 @@ const fetchPHPData = async (): Promise<{
 
 // ---- Parsing helpers ----
 
-const normalizeGymName = (name: string) => {
-	return name
-		.normalize("NFKD")
-		.replace(/['']/g, "")
-		.replace(/\s+/g, " ")
-		.trim()
-		.toLowerCase();
-};
-
 type PbGym = {
 	id: string;
 	name: string;
@@ -438,21 +431,12 @@ type PbGym = {
 	Squat_Racks?: number;
 };
 
-const getGymMetadataScore = (gym: PbGym) => {
-	let score = 0;
-	if (gym.active) score += 100;
-	if ((gym.postcode ?? 0) > 0) score += 10;
-	if ((gym.area_size ?? 0) > 0) score += 10;
-	if (gym.address && gym.address !== "Pending Update") score += 10;
-	return score;
-};
-
 const buildGymsByNormalizedName = (gyms: PbGym[]) => {
 	const gymsByNormalizedName = new Map<string, PbGym>();
 	for (const gym of gyms) {
 		const normalizedName = normalizeGymName(gym.name);
 		const existingGym = gymsByNormalizedName.get(normalizedName);
-		if (!existingGym || getGymMetadataScore(gym) > getGymMetadataScore(existingGym)) {
+		if (!existingGym || gymRecordScore(gym) > gymRecordScore(existingGym)) {
 			gymsByNormalizedName.set(normalizedName, gym);
 		}
 	}
@@ -642,7 +626,22 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
 
-	for (const club of clubCounts) {
+	// The portal reports clubs that are not gyms — unopened sites, retired clubs
+	// of relocated gyms (see gymDirectory.ts). Only a club that is already a
+	// tracked gym or has a page in the public gym directory may become one.
+	const { tracked, skipped } = filterTrackableClubs(clubCounts, {
+		knownGymNames: existingGyms.map((gym) => gym.name),
+		openGymNames: await getOpenGymNames(),
+	});
+	if (skipped.length > 0) {
+		console.log(
+			`${STAGE.PARSE} ${STAGE.WARN} Skipped ${skipped.length} club(s) that are not Revo gyms: ${skipped
+				.map((club) => club.name)
+				.join(", ")}`,
+		);
+	}
+
+	for (const club of tracked) {
 		const scrapedName = club.name;
 		const memberCount = club.count;
 		const metadata = gymsByNormalizedName.get(normalizeGymName(scrapedName));

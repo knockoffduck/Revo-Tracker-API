@@ -27,6 +27,8 @@
     database.ts         # PocketBase admin client and helpers
     proxy.ts            # HTTP proxy with fallback logic (Webshare)
     tools.ts            # simpleIntegerHash() — deterministic gym ID from name+postcode
+    gymDirectory.ts     # Open gyms from revofitness.com.au/gyms (cached 24h in logs/open_gyms.json)
+    gymFilter.ts        # normalizeGymName(), filterTrackableClubs() — club vs real gym, record scoring
     handlers.ts         # API response helpers (handleSuccess / handleError)
     types.ts            # GymInfo type definition
     gyms.json           # Static registry of ~50 known gym names and sizes
@@ -44,10 +46,13 @@
   dropouts*.json        # statAudit repair reports
 /scripts
   repair-gym-dropouts.ts # CLI tool for running statAudit (see §6)
+  archive-gym-count.ts   # Retention archiver (see §6)
+  purge-non-gyms.ts      # Removes phantom/duplicate gyms from Revo_Gyms (see §6)
 /tests
-  *.test.ts             # Bun test suite (60 tests)
+  *.test.ts             # Bun test suite (82 tests)
 /logs
   updated_stats.json     # Last 5 scrape sessions (rolling)
+  open_gyms.json         # Cached gym directory (24h TTL, written by gymDirectory.ts)
 /Dockerfile              # Multi-stage bun build — production deps only
 docker-compose.yml       # Single-service compose for local dev
 .env                     # POCKETBASE_*, PROXY_*, etc.
@@ -122,7 +127,17 @@ All responses follow `{ success: true, data: ... }` or `{ success: false, error:
 2. Each cookie attempt calls `fetchPHPDataWithCookie()` (up to 2 retries on network errors)
 3. After a successful fetch, `extractClubCounts()` parses `var clubCounterLists = {...}` JSON block; fallback is DOM parsing via `.attr('data-member-in-club')`
 4. `parseHTML()` — joins scraped counts with gym metadata from `Revo_Gyms` using **normalized name matching** (NFKD normalization, apostrophe strip, lowercase) to handle `O'Connor` vs `OConnor`
-5. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. For gyms that were in the DB but not in the scrape, inserts a 0-count row. Writes a rolling log to `logs/updated_stats.json`
+5. `filterTrackableClubs()` (src/utils/gymFilter.ts) — keeps only clubs that are gyms: the club must be listed by the public gym directory (`getOpenGymNames()`) or already exist in `Revo_Gyms`. The rest (unopened sites, clubs retired by a relocation, aliases) is logged as `⚠ Skipped N club(s) that are not Revo gyms` and dropped, so it can never create a gym
+6. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. For gyms that were in the DB but not in the scrape, inserts a 0-count row. Writes a rolling log to `logs/updated_stats.json`
+
+### Why the club list is filtered
+
+`revocentral`'s `clubCounterLists` is Revo's chain database, not a list of gyms. It contains clubs for sites that have not opened (e.g. Trinity Gardens, Busselton), the retired club of a relocated site (e.g. `Nunawading - (Original)`, `Cockburn2`) and aliases of an already-listed gym (e.g. `Knox` for Knoxfield). Creating a gym from every club name is what produced phantom locations in `Revo_Gyms`, each accumulating a 0-count snapshot every five minutes forever.
+
+- The directory page `https://revofitness.com.au/gyms/` publishes a WordPress `gyms` post per **open** gym; only `post_status: "publish"` titles count
+- It is fetched at most once per day and cached in `logs/open_gyms.json`; a page yielding fewer than 20 names is treated as broken markup and the cached list is reused
+- If the directory is neither fetchable nor cached, the filter falls back to "already in `Revo_Gyms`" — that keeps known gyms reporting and still cannot invent one
+- Alerts: key `directory.gyms` (warning) when the page cannot be fetched or parsed
 
 ### Cookie Rotation
 
@@ -181,7 +196,10 @@ The PHP portal page structure is the single point of failure:
 Gyms that exist in `Revo_Gyms` but not in the scrape get a 0-count inserted. Common reasons: gym temporarily unavailable, proxy failure, cookie expiry. These appear in logs as "known gyms missing from scrape" and are listed individually by name and postcode.
 
 ### O'Connor / OConnor naming
-The scraper source uses `OConnor` (no apostrophe). Normalization in `normalizeGymName()` strips apostrophes to match. Be aware when adding gym filters or comparing names.
+The scraper source uses `OConnor` (no apostrophe). Normalization in `normalizeGymName()` (src/utils/gymFilter.ts) strips both `'` and `’` to match. Be aware when adding gym filters or comparing names.
+
+### Gym directory is the second point of failure
+`src/utils/gymDirectory.ts` reads `https://revofitness.com.au/gyms/` and matches `"post_title":"…"` against `"post_status":"publish"` and `"post_type":"gyms"` inside the page's embedded WordPress payload. If the theme stops embedding that payload, fewer than 20 names come back, the page is rejected and the cached `logs/open_gyms.json` keeps being used — for at most one more day, after which the filter falls back to "already in `Revo_Gyms`". A warning alert (`directory.gyms`) fires on both the fetch and the parse failure.
 
 ### Proxy dependency
 All HTTP requests go through Webshare proxy (`p.webshare.io:80`) with TLS verification disabled. If proxies fail, requests fall back to direct connection.
@@ -209,6 +227,24 @@ Outputs:
 - Reports written to `reports/stat-audit-TIMESTAMP.json`
 - Console summary: gyms scanned, suspicious zeros found, fixes proposed/applied
 
+### Purge non-gyms — Remove phantom and duplicate gyms
+```bash
+bun run scripts/purge-non-gyms.ts           # dry run (default)
+bun run scripts/purge-non-gyms.ts --apply   # delete
+```
+Deletes `Revo_Gyms` records that are not real locations and the snapshots/trend rows that belong to them. A record is kept only when the public gym directory lists it; when two records describe one location (e.g. `OConnor` and `O'Connor`), the richer one survives — `gymRecordScore()` prefers active, with postcode, area size and a real address.
+
+Run it after a scrape has introduced junk, or when `Revo_Gyms` gains a location nobody can find. Snapshots are matched by `gym_id` **and** `gym_name`, so rows written before the gym had an ID go too. The script aborts rather than delete anything while the directory is unreachable.
+
+Outputs:
+- Console list of every record removed, with the reason and the rows it owns
+
+### Archive Revo_Gym_Count — 90-day retention
+```bash
+bun run scripts/archive-gym-count.ts [--retention-days 90] [--dry-run]
+```
+Deletes snapshots older than the retention window (`ARCHIVE_RETENTION_DAYS`, default 90). The scheduler runs it weekly.
+
 ---
 
 ## 7. Environment Variables
@@ -234,8 +270,10 @@ Outputs:
 bun install              # Install dependencies
 bun run dev              # Start dev server (port 3001, hot reload)
 bun run start            # Start production server
-bun test                 # Run all tests (60 tests)
+bun test                 # Run all tests (82 tests)
 bun run audit:dropouts   # Run statAudit (dry-run by default)
+bun run archive:gym-count # Archive snapshots past the retention window
+bun run purge:non-gyms   # Remove phantom/duplicate gyms (dry-run by default)
 
 # Cookie management
 bun run Scraper/generate_cookies.ts  # Generate 10 fresh cookies

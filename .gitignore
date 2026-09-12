@@ -2,3 +2,6 @@
 node_modules/
 .env
 .env.Dockerfile.swp
+
+# runtime cache for the gym directory (regenerated daily)
+logs/open_gyms.json
