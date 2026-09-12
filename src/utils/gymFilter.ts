@@ -41,6 +41,26 @@ export const gymRecordScore = (gym: GymRecordLike): number => {
 	return score;
 };
 
+/**
+ * IANA timezone per Australian state, for a gym registered automatically from
+ * its detail page — its local timezone decides which day and hour slot a
+ * reading belongs to (trends, local dates), so a new South Australian gym must
+ * not inherit the Perth default.
+ */
+const TIMEZONE_BY_STATE: Record<string, string> = {
+	WA: "Australia/Perth",
+	NT: "Australia/Darwin",
+	SA: "Australia/Adelaide",
+	QLD: "Australia/Brisbane",
+	NSW: "Australia/Sydney",
+	ACT: "Australia/Sydney",
+	VIC: "Australia/Melbourne",
+	TAS: "Australia/Hobart",
+};
+
+export const timezoneForState = (state: string | null | undefined): string =>
+	TIMEZONE_BY_STATE[(state ?? "").trim().toUpperCase()] ?? "Australia/Perth";
+
 export type ClubSources = {
 	/** Names of the gyms already tracked in Revo_Gyms. */
 	knownGymNames: Iterable<string>;

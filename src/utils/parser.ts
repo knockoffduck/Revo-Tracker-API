@@ -6,8 +6,10 @@ import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from ".
 import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { readString, simpleIntegerHash } from "./tools";
-import { normalizeGymName, filterTrackableClubs, gymRecordScore } from "./gymFilter";
+import { normalizeGymName, filterTrackableClubs, gymRecordScore, timezoneForState } from "./gymFilter";
 import { getOpenGymNames } from "./gymDirectory";
+import { detailPageShowsRealGym, locationsOf, locationKey } from "./gymVerification";
+import { getGymDetails, type GymDetails } from "./details";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { PHPSerializer } from "../../Scraper/deserializer";
 import { describeError, resolveAlert, sendAlert } from "./alerts";
@@ -533,7 +535,7 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 				areaSize: gym.size || existingGym?.area_size || 0,
 				lastUpdated: sqlTime,
 				active: 1,
-				timezone: existingGym?.timezone ?? "Australia/Perth",
+				timezone: existingGym?.timezone ?? timezoneForState(gym.state ?? existingGym?.state),
 				longitude: existingGym?.longitude ?? 0,
 				latitude: existingGym?.latitude ?? 0,
 				squatRacks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,
@@ -604,6 +606,41 @@ const extractClubCounts = ($: cheerio.CheerioAPI) => {
 
 // ---- Public API ----
 
+/**
+ * Detail pages for the clubs without a gym record yet.
+ *
+ * That page is where the app reads gym size, squat racks and address from, so a
+ * club whose page describes a real gym is a gym that exists — including one
+ * that opened since the last time the gym directory was fetched. Fetching the
+ * details here registers such a gym complete, rather than as an empty record
+ * that only the two-day enrichment would fill in. Clubs already in `Revo_Gyms`
+ * are skipped: their stored metadata is the app's current truth.
+ */
+const fetchDetailsForUnregisteredClubs = async (
+	clubs: { name: string }[],
+	gymsByNormalizedName: Map<string, PbGym>,
+): Promise<Map<string, GymDetails>> => {
+	const unregistered = clubs.filter(
+		(club) => !gymsByNormalizedName.has(normalizeGymName(club.name)),
+	);
+	const detailsByName = new Map<string, GymDetails>();
+	if (unregistered.length === 0) return detailsByName;
+
+	// Same concurrency as the enrichment pass — the proxy dislikes bursts.
+	const chunkSize = 5;
+	for (let i = 0; i < unregistered.length; i += chunkSize) {
+		const chunk = unregistered.slice(i, i + chunkSize);
+		const results = await Promise.all(
+			chunk.map(async (club) => ({ club, details: await getGymDetails(club.name) })),
+		);
+		for (const { club, details } of results) {
+			detailsByName.set(normalizeGymName(club.name), details);
+		}
+	}
+
+	return detailsByName;
+};
+
 export const parseHTML = async (): Promise<GymInfo[]> => {
 	const parseStart = Date.now();
 	console.log(`\n${STAGE.PARSE} ═══════════════════════════════════════════════════`);
@@ -627,24 +664,43 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const gymData: GymInfo[] = [];
 
 	// The portal reports clubs that are not gyms — unopened sites, retired clubs
-	// of relocated gyms (see gymDirectory.ts). Only a club that is already a
-	// tracked gym or has a page in the public gym directory may become one.
-	const { tracked, skipped } = filterTrackableClubs(clubCounts, {
+	// of relocated gyms (see gymDirectory.ts). A club is a gym when it is already
+	// tracked, when the public gym directory lists it, or when its own detail
+	// page describes a real gym (see gymVerification.ts), which is how a gym that
+	// has just opened gets picked up. Everything else is logged and dropped.
+	const { tracked } = filterTrackableClubs(clubCounts, {
 		knownGymNames: existingGyms.map((gym) => gym.name),
 		openGymNames: await getOpenGymNames(),
 	});
-	if (skipped.length > 0) {
-		console.log(
-			`${STAGE.PARSE} ${STAGE.WARN} Skipped ${skipped.length} club(s) that are not Revo gyms: ${skipped
-				.map((club) => club.name)
-				.join(", ")}`,
-		);
-	}
+	const listedNames = new Set(tracked.map((club) => normalizeGymName(club.name)));
+	const detailsByName = await fetchDetailsForUnregisteredClubs(clubCounts, gymsByNormalizedName);
+	const claimedLocations = locationsOf(existingGyms);
 
-	for (const club of tracked) {
+	const newGyms: string[] = [];
+	const notGyms: string[] = [];
+	const aliases: string[] = [];
+
+	for (const club of clubCounts) {
 		const scrapedName = club.name;
 		const memberCount = club.count;
-		const metadata = gymsByNormalizedName.get(normalizeGymName(scrapedName));
+		const normalized = normalizeGymName(scrapedName);
+		const metadata = gymsByNormalizedName.get(normalized);
+		const details = metadata ? null : detailsByName.get(normalized);
+		const isRealGym = details ? detailPageShowsRealGym(details) : false;
+
+		if (!metadata && !isRealGym && !listedNames.has(normalized)) {
+			// Neither tracked, listed, nor backed by a gym page: a club, not a location.
+			notGyms.push(scrapedName);
+			continue;
+		}
+
+		const location = details ? locationKey(details) : null;
+		if (!metadata && location && claimedLocations.has(location)) {
+			// The club points at a gym that is already tracked — an alias such as
+			// "Knox" for "Knoxfield" shares the address.
+			aliases.push(scrapedName);
+			continue;
+		}
 
 		if (metadata) {
 			const size = metadata.area_size || 0;
@@ -660,18 +716,42 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 				member_ratio: memberRatio,
 				percentage: percentage,
 			});
-		} else {
-			gymData.push({
-				name: scrapedName,
-				address: "Pending Update",
-				postcode: 0,
-				size: 0,
-				state: "Unknown",
-				member_count: memberCount,
-				member_ratio: 0,
-				percentage: 0,
-			});
+			continue;
 		}
+
+		const size = (isRealGym ? details!.areaSize : null) ?? 0;
+		const count = memberCount > 0 ? memberCount : 0;
+		const { memberRatio, percentage } = calculateGymRatios(size, count);
+		if (isRealGym) newGyms.push(scrapedName);
+		gymData.push({
+			name: scrapedName,
+			// A listed gym without a readable page keeps the placeholder the
+			// enrichment pass replaces on its next run.
+			address: details?.address ?? "Pending Update",
+			postcode: details?.postcode ?? 0,
+			size: size,
+			state: details?.state ?? "Unknown",
+			member_count: count,
+			member_ratio: memberRatio,
+			percentage: percentage,
+			...(details?.squatRacks != null ? { squat_racks: details.squatRacks } : {}),
+		});
+	}
+
+	if (newGyms.length > 0) {
+		console.log(
+			`${STAGE.PARSE} ${STAGE.INFO} New gym(s) confirmed by their detail page: ${newGyms.join(", ")}`,
+		);
+	}
+	if (aliases.length > 0) {
+		console.log(
+			`${STAGE.PARSE} ${STAGE.WARN} Skipped ${aliases.length} club(s) pointing at an existing gym: ${aliases.join(", ")}`,
+		);
+	}
+	if (notGyms.length > 0) {
+		console.log(
+			`${STAGE.PARSE} ${STAGE.WARN} Skipped ${notGyms.length} club(s) that are not Revo gyms: ${notGyms.join(", ")}`,
+		);
 	}
 
 	// Log sample gyms
@@ -690,11 +770,28 @@ export const insertGymStats = async (gymData: GymInfo[]) => {
 
 	const currentTime = toPbDate(new Date());
 	await ensureAdminAuth();
-	const gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
+	let gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
 		filter: "active=true",
 		batch: 200,
 	});
-	const gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+	let gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+
+	// A club that parseHTML confirmed as a real gym from its detail page has no
+	// record yet. Create it here, with the size, racks and address that page
+	// carried, so a newly opened gym appears in the app without anyone editing
+	// the database; the enrichment pass fills in whatever is still missing.
+	const newGyms = gymData.filter((gym) => !gymsByNormalizedName.has(normalizeGymName(gym.name)));
+	if (newGyms.length > 0) {
+		console.log(
+			`${STAGE.DB} ${STAGE.INFO} Registering ${newGyms.length} new gym(s): ${newGyms.map((gym) => gym.name).join(", ")}`,
+		);
+		await updateGymInfo(newGyms);
+		gymList = await pb.collection("Revo_Gyms").getFullList<PbGym>({
+			filter: "active=true",
+			batch: 200,
+		});
+		gymsByNormalizedName = buildGymsByNormalizedName(gymList);
+	}
 
 	let inserts = 0;
 
@@ -898,7 +995,7 @@ export const updateGymInfo = async (gymData: GymInfo[]) => {
 			area_size: gym.size || existingGym?.area_size || 0,
 			last_updated: currentTime,
 			active: true,
-			timezone: existingGym?.timezone ?? "Australia/Perth",
+			timezone: existingGym?.timezone ?? timezoneForState(gym.state ?? existingGym?.state),
 			longitude: existingGym?.longitude ?? 0,
 			latitude: existingGym?.latitude ?? 0,
 			Squat_Racks: gym.squat_racks ?? existingGym?.Squat_Racks ?? 0,

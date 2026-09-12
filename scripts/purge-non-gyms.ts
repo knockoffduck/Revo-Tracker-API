@@ -22,6 +22,7 @@ import { pb, ensureAdminAuth } from "../src/utils/database";
 import { sendAlert } from "../src/utils/alerts";
 import { getOpenGymNames } from "../src/utils/gymDirectory";
 import { gymRecordScore, normalizeGymName } from "../src/utils/gymFilter";
+import { locationKey, locationsOf, verifyRealGym } from "../src/utils/gymVerification";
 
 const GYM_COLLECTION = "Revo_Gyms";
 const COUNT_COLLECTION = "Revo_Gym_Count";
@@ -66,10 +67,18 @@ const deleteWhere = async (collection: string, filter: string): Promise<number> 
 };
 
 /**
- * The rows to delete: gyms the directory does not list, plus the poorer record
- * whenever two records describe one location.
+ * The rows to delete: gyms the directory does not list and whose own detail page
+ * does not describe a real gym, plus the poorer record whenever two records
+ * describe one location.
+ *
+ * A record that is not in the directory but *does* have a real detail page is
+ * left alone: that is what a gym looks like in the window between opening and
+ * the directory being updated, and the scrape tracks it from the detail page. A
+ * record whose detail page shares the address of a listed gym is an alias of it
+ * — the portal keeps a club for the gym a relocation replaced, such as "Knox"
+ * for "Knoxfield" — and goes.
  */
-const findStaleGyms = (gyms: GymRecord[], openGyms: Set<string>): StaleGym[] => {
+const findStaleGyms = async (gyms: GymRecord[], openGyms: Set<string>): Promise<StaleGym[]> => {
 	const bestByName = new Map<string, GymRecord>();
 
 	for (const gym of gyms) {
@@ -78,16 +87,27 @@ const findStaleGyms = (gyms: GymRecord[], openGyms: Set<string>): StaleGym[] => 
 		if (!best || gymRecordScore(gym) > gymRecordScore(best)) bestByName.set(key, gym);
 	}
 
+	const listedLocations = locationsOf(gyms.filter((gym) => openGyms.has(normalizeGymName(gym.name))));
 	const stale: StaleGym[] = [];
 
 	for (const gym of gyms) {
 		const key = normalizeGymName(gym.name);
 		const best = bestByName.get(key)!;
 
-		if (!openGyms.has(key)) {
-			stale.push({ gym, reason: "not in the gym directory" });
-		} else if (best.id !== gym.id) {
-			stale.push({ gym, reason: `duplicate of ${best.name} (${best.id})` });
+		if (openGyms.has(key)) {
+			if (best.id !== gym.id) stale.push({ gym, reason: `duplicate of ${best.name} (${best.id})` });
+			continue;
+		}
+
+		const details = await verifyRealGym(gym.name);
+		if (!details) {
+			stale.push({ gym, reason: "not in the gym directory and has no gym detail page" });
+		} else if (locationKey(details) && listedLocations.has(locationKey(details)!)) {
+			stale.push({ gym, reason: "same address as a gym that is open today" });
+		} else {
+			console.log(
+				`[Purge]   Keeping ${gym.name} (${gym.id}) — its detail page shows a real gym the directory has not caught up with; deactivate it in the dashboard if it has actually closed`,
+			);
 		}
 	}
 
@@ -108,7 +128,7 @@ export const purgeNonGyms = async (dryRun = false): Promise<PurgeResult> => {
 
 	await ensureAdminAuth();
 	const gyms = await pb.collection(GYM_COLLECTION).getFullList<GymRecord>({ batch: 200 });
-	const stale = findStaleGyms(gyms, openGyms);
+	const stale = await findStaleGyms(gyms, openGyms);
 
 	console.log(`[Purge] Directory:   ${openGyms.size} gyms`);
 	console.log(`[Purge] Revo_Gyms:   ${gyms.length} records`);

@@ -28,7 +28,8 @@
     proxy.ts            # HTTP proxy with fallback logic (Webshare)
     tools.ts            # simpleIntegerHash() — deterministic gym ID from name+postcode
     gymDirectory.ts     # Open gyms from revofitness.com.au/gyms (cached 24h in logs/open_gyms.json)
-    gymFilter.ts        # normalizeGymName(), filterTrackableClubs() — club vs real gym, record scoring
+    gymFilter.ts        # normalizeGymName(), filterTrackableClubs(), timezoneForState()
+    gymVerification.ts  # detailPageShowsRealGym()/verifyRealGym() — is this a real gym, and where?
     handlers.ts         # API response helpers (handleSuccess / handleError)
     types.ts            # GymInfo type definition
     gyms.json           # Static registry of ~50 known gym names and sizes
@@ -49,7 +50,7 @@
   archive-gym-count.ts   # Retention archiver (see §6)
   purge-non-gyms.ts      # Removes phantom/duplicate gyms from Revo_Gyms (see §6)
 /tests
-  *.test.ts             # Bun test suite (82 tests)
+  *.test.ts             # Bun test suite (93 tests)
 /logs
   updated_stats.json     # Last 5 scrape sessions (rolling)
   open_gyms.json         # Cached gym directory (24h TTL, written by gymDirectory.ts)
@@ -75,7 +76,7 @@ Data is stored in a PocketBase instance. The active collections are `Revo_Gyms`,
 | address | text | Street address |
 | postcode | number | |
 | active | bool | true = active |
-| timezone | text | IANA tz e.g. `Australia/Perth`, default Perth |
+| timezone | text | IANA tz e.g. `Australia/Perth`; for a gym registered automatically it comes from its state (`timezoneForState()`), otherwise Perth |
 | longitude/latitude | number | Optional geocoding |
 | Squat_Racks | number | Scraped from gym detail page |
 | last_updated | date | |
@@ -127,17 +128,26 @@ All responses follow `{ success: true, data: ... }` or `{ success: false, error:
 2. Each cookie attempt calls `fetchPHPDataWithCookie()` (up to 2 retries on network errors)
 3. After a successful fetch, `extractClubCounts()` parses `var clubCounterLists = {...}` JSON block; fallback is DOM parsing via `.attr('data-member-in-club')`
 4. `parseHTML()` — joins scraped counts with gym metadata from `Revo_Gyms` using **normalized name matching** (NFKD normalization, apostrophe strip, lowercase) to handle `O'Connor` vs `OConnor`
-5. `filterTrackableClubs()` (src/utils/gymFilter.ts) — keeps only clubs that are gyms: the club must be listed by the public gym directory (`getOpenGymNames()`) or already exist in `Revo_Gyms`. The rest (unopened sites, clubs retired by a relocation, aliases) is logged as `⚠ Skipped N club(s) that are not Revo gyms` and dropped, so it can never create a gym
-6. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. For gyms that were in the DB but not in the scrape, inserts a 0-count row. Writes a rolling log to `logs/updated_stats.json`
+5. `filterTrackableClubs()` (src/utils/gymFilter.ts) — a club is a gym when it is already in `Revo_Gyms` or listed by the public gym directory (`getOpenGymNames()`)
+6. Clubs with **no gym record yet** get their own detail page fetched (`getGymDetails()`, src/utils/details.ts) — the page the app reads size, squat racks and address from. A page describing a real gym (floor area, or a street address with postcode) at a location no tracked gym claims is a gym that has just opened: it is tracked, logged as `ℹ New gym(s) confirmed by their detail page: …`, and registered by `insertGymStats()`
+7. Rejected clubs are logged as `⚠ Skipped N club(s) pointing at an existing gym` (an alias — its page shares a tracked gym's address, e.g. `Knox` → Knoxfield) or `⚠ Skipped N club(s) that are not Revo gyms` (no page at all), and dropped, so neither can create a gym
+8. `insertGymStats()` — inserts one row per gym to `Revo_Gym_Count`. A gym without a record yet is created first (`updateGymInfo()`), so a newly opened gym appears in the app on its first reading — with the size, racks, address and state-timezone its detail page carried; the two-day enrichment fills in the rest. For gyms that were in the DB but not in the scrape, inserts a 0-count row. Writes a rolling log to `logs/updated_stats.json`
 
-### Why the club list is filtered
+### How a club is judged a real gym
 
-`revocentral`'s `clubCounterLists` is Revo's chain database, not a list of gyms. It contains clubs for sites that have not opened (e.g. Trinity Gardens, Busselton), the retired club of a relocated site (e.g. `Nunawading - (Original)`, `Cockburn2`) and aliases of an already-listed gym (e.g. `Knox` for Knoxfield). Creating a gym from every club name is what produced phantom locations in `Revo_Gyms`, each accumulating a 0-count snapshot every five minutes forever.
+`revocentral`'s `clubCounterLists` is Revo's chain database, not a list of gyms. It contains clubs for sites that have not opened (e.g. Trinity Gardens, Busselton), the retired club of a relocated site (e.g. `Nunawading - (Original)`, `Cockburn2`) and aliases of an already-tracked gym (e.g. `Knox` for Knoxfield). Creating a gym from every club name is what produced phantom locations in `Revo_Gyms`, each accumulating a 0-count snapshot every five minutes forever. Two independent sources decide, both already used by the app:
 
-- The directory page `https://revofitness.com.au/gyms/` publishes a WordPress `gyms` post per **open** gym; only `post_status: "publish"` titles count
-- It is fetched at most once per day and cached in `logs/open_gyms.json`; a page yielding fewer than 20 names is treated as broken markup and the cached list is reused
-- If the directory is neither fetchable nor cached, the filter falls back to "already in `Revo_Gyms`" — that keeps known gyms reporting and still cannot invent one
+**The open-gym directory** — `https://revofitness.com.au/gyms/` publishes a WordPress `gyms` post per open gym; only `post_status: "publish"` titles count (`gymDirectory.ts`).
+
+- Fetched at most once a day and cached in `logs/open_gyms.json`; a page yielding fewer than 20 names is treated as broken markup and the cached list is reused
 - Alerts: key `directory.gyms` (warning) when the page cannot be fetched or parsed
+
+**The gym's own detail page** — `https://revofitness.com.au/gyms/<slug>/`, scraped by `details.ts` (`gymVerification.ts`).
+
+- Real when the page states a floor area, or a street address with a postcode. Coming-soon sites and retired clubs have no page at all; squat racks alone do not count (a closed gym's page keeps them — Shenton Park still shows 11)
+- The page for an *unlisted* gym whose address matches a tracked gym is an alias of it, not a new gym
+- Only fetched for clubs without a record yet, five at a time
+- This is what picks up a gym that has opened since the directory was last fetched: the club counter reports it, its page proves it, and `insertGymStats()` registers it
 
 ### Cookie Rotation
 
@@ -232,12 +242,16 @@ Outputs:
 bun run scripts/purge-non-gyms.ts           # dry run (default)
 bun run scripts/purge-non-gyms.ts --apply   # delete
 ```
-Deletes `Revo_Gyms` records that are not real locations and the snapshots/trend rows that belong to them. A record is kept only when the public gym directory lists it; when two records describe one location (e.g. `OConnor` and `O'Connor`), the richer one survives — `gymRecordScore()` prefers active, with postcode, area size and a real address.
+Deletes `Revo_Gyms` records that are not real locations and the snapshots/trend rows that belong to them. A record survives when the public gym directory lists it, or — for a record the directory has not caught up with — when its own detail page describes a real gym at an address no open gym claims; that second case is what keeps a newly opened gym from being deleted the day after the scrape registered it. Records deleted:
 
-Run it after a scrape has introduced junk, or when `Revo_Gyms` gains a location nobody can find. Snapshots are matched by `gym_id` **and** `gym_name`, so rows written before the gym had an ID go too. The script aborts rather than delete anything while the directory is unreachable.
+- not in the directory and no detail page (unopened sites, retired clubs of relocated gyms)
+- not in the directory, real page, but the same address as an open gym — an alias such as `Knox` for Knoxfield
+- the poorer of two records for one location — `gymRecordScore()` prefers active, with postcode, area size and a real address
+
+Snapshots are matched by `gym_id` **and** `gym_name`, so rows written before the gym had an ID go too. The script aborts rather than delete anything while the directory is unreachable.
 
 Outputs:
-- Console list of every record removed, with the reason and the rows it owns
+- Console list of every record removed, with the reason and the rows it owns; records kept are listed too
 
 ### Archive Revo_Gym_Count — 90-day retention
 ```bash
@@ -270,7 +284,7 @@ Deletes snapshots older than the retention window (`ARCHIVE_RETENTION_DAYS`, def
 bun install              # Install dependencies
 bun run dev              # Start dev server (port 3001, hot reload)
 bun run start            # Start production server
-bun test                 # Run all tests (82 tests)
+bun test                 # Run all tests (93 tests)
 bun run audit:dropouts   # Run statAudit (dry-run by default)
 bun run archive:gym-count # Archive snapshots past the retention window
 bun run purge:non-gyms   # Remove phantom/duplicate gyms (dry-run by default)
