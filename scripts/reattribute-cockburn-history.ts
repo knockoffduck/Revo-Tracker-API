@@ -40,9 +40,11 @@ const moveWhere = async (
 	// Walk one bounded window at a time so a shrinking total cannot skip rows.
 	let moved = 0;
 	while (true) {
-		const chunk = await pb.collection("Revo_Gym_Count").getList(BATCH, 1, {
+		// Newest first: the oldest rows are the ones the archiver is deleting
+		// right now, and touching them turns every batch into 100 failing writes.
+		const chunk = await pb.collection("Revo_Gym_Count").getList(1, BATCH, {
 			filter,
-			sort: "created",
+			sort: "-created",
 			fields: "id",
 		});
 		if (chunk.items.length === 0) break;
