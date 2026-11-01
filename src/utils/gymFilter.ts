@@ -62,6 +62,35 @@ export const timezoneForState = (state: string | null | undefined): string =>
 	TIMEZONE_BY_STATE[(state ?? "").trim().toUpperCase()] ?? DEFAULT_TIMEZONE;
 
 /**
+ * Postcode blocks each state and territory was allocated.
+ *
+ * Used to reject a number scraped out of prose: a club page announcing "coming
+ * on the 7th October 2026" once had 2026 stored as Cockburn's postcode because
+ * the extractor takes the last 4-digit number it sees. A year is not a postcode
+ * anywhere, and a WA gym cannot be in 2026.
+ */
+const POSTCODE_RANGES: Record<string, [number, number][]> = {
+	WA: [[6000, 6999]],
+	SA: [[5000, 5999]],
+	VIC: [[3000, 3999], [8000, 8999]],
+	NSW: [[1000, 2999], [2000, 2999]],
+	QLD: [[4000, 4999], [9000, 9999]],
+	TAS: [[7000, 7999]],
+	NT: [[800, 899]],
+	ACT: [[200, 299], [2600, 2620]],
+};
+
+/** Whether a postcode falls in the block allocated to that state. */
+export const postcodeMatchesState = (
+	postcode: number,
+	state: string | null | undefined,
+): boolean => {
+	const ranges = POSTCODE_RANGES[(state ?? "").trim().toUpperCase()];
+	if (!ranges) return postcode >= 200 && postcode <= 9999;
+	return ranges.some(([low, high]) => postcode >= low && postcode <= high);
+};
+
+/**
  * The timezone to store for a gym: one that is already set stays, except while
  * it is still the default. A gym registered from a detail page that did not
  * state its state therefore keeps the default until a later run resolves the

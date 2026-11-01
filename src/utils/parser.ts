@@ -7,6 +7,7 @@ import { sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { readString, simpleIntegerHash } from "./tools";
 import { normalizeGymName, filterTrackableClubs, gymRecordScore, resolveTimezone } from "./gymFilter";
+import { resolveClubGymName } from "./clubOverrides";
 import { getOpenGymNames } from "./gymDirectory";
 import { detailPageShowsRealGym, locationOwners, locationKey } from "./gymVerification";
 import { getGymDetails, type GymDetails } from "./details";
@@ -666,24 +667,44 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 	const gymsByNormalizedName = buildGymsByNormalizedName(existingGyms);
 	const gymData: GymInfo[] = [];
 
+	// Portal clubs whose gym is not the club of the same name (a relocated site
+	// reports the new building under a suffixed club name). Translate once, then
+	// everything downstream — the filter, the detail pages, the database — works
+	// in gym names. See clubOverrides.ts.
+	const clubs = clubCounts.map((club) => ({
+		portalName: club.name,
+		name: resolveClubGymName(club.name),
+		count: club.count,
+	}));
+	const renamedClubs = clubs.filter((club) => club.portalName !== club.name);
+	if (renamedClubs.length > 0) {
+		console.log(
+			`${STAGE.PARSE} ${STAGE.INFO} Relocated club name(s): ${renamedClubs
+				.map((club) => `${club.portalName} → ${club.name}`)
+				.join(", ")}`,
+		);
+	}
+	const clubLabel = (club: { portalName: string; name: string }) =>
+		club.portalName === club.name ? club.name : `${club.portalName} → ${club.name}`;
+
 	// The portal reports clubs that are not gyms — unopened sites, retired clubs
 	// of relocated gyms (see gymDirectory.ts). A club is a gym when it is already
 	// tracked, when the public gym directory lists it, or when its own detail
 	// page describes a real gym (see gymVerification.ts), which is how a gym that
 	// has just opened gets picked up. Everything else is logged and dropped.
-	const { tracked } = filterTrackableClubs(clubCounts, {
+	const { tracked } = filterTrackableClubs(clubs, {
 		knownGymNames: existingGyms.map((gym) => gym.name),
 		openGymNames: await getOpenGymNames(),
 	});
 	const listedNames = new Set(tracked.map((club) => normalizeGymName(club.name)));
-	const detailsByName = await fetchDetailsForUnregisteredClubs(clubCounts, gymsByNormalizedName);
+	const detailsByName = await fetchDetailsForUnregisteredClubs(clubs, gymsByNormalizedName);
 	const claimedLocations = locationOwners(allGyms);
 
 	const newGyms: string[] = [];
 	const notGyms: string[] = [];
 	const aliases: string[] = [];
 
-	for (const club of clubCounts) {
+	for (const club of clubs) {
 		const scrapedName = club.name;
 		const memberCount = club.count;
 		const normalized = normalizeGymName(scrapedName);
@@ -693,7 +714,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 
 		if (!metadata && !isRealGym && !listedNames.has(normalized)) {
 			// Neither tracked, listed, nor backed by a gym page: a club, not a location.
-			notGyms.push(scrapedName);
+			notGyms.push(clubLabel(club));
 			continue;
 		}
 
@@ -702,7 +723,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 		if (owner) {
 			// The club points at a gym that is already tracked — an alias such as
 			// "Knox" for "Knoxfield" shares the address.
-			aliases.push(`${scrapedName} → ${owner}`);
+			aliases.push(`${clubLabel(club)} → ${owner}`);
 			continue;
 		}
 
@@ -726,7 +747,7 @@ export const parseHTML = async (): Promise<GymInfo[]> => {
 		const size = details?.areaSize ?? 0;
 		const count = memberCount > 0 ? memberCount : 0;
 		const { memberRatio, percentage } = calculateGymRatios(size, count);
-		if (isRealGym) newGyms.push(scrapedName);
+		if (isRealGym) newGyms.push(clubLabel(club));
 		gymData.push({
 			name: scrapedName,
 			// A listed gym without a readable page keeps the placeholder the

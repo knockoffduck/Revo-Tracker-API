@@ -2,6 +2,8 @@ import * as cheerio from "cheerio";
 import { GymInfo } from "./types";
 import { axiosGetWithProxyFallback } from "./proxy";
 import { describeError, resolveAlert, sendAlert } from "./alerts";
+import { postcodeMatchesState } from "./gymFilter";
+import { hasDetailPage, resolveClubGymName } from "./clubOverrides";
 
 const getSlug = (name: string): string => {
 	// Special case for OConnor -> oconnor (removing CamelCase/apostrophe implication issues if any, but based on gyms.json it is "OConnor")
@@ -18,6 +20,35 @@ const POSTCODE_REGEX = /\b(\d{4})\b/;
 const STREET_KEYWORD_REGEX = /\b(Street|St|Road|Rd|Avenue|Ave|Drive|Dr|Highway|Hwy|Boulevard|Blvd|Square|Plaza|Way|Lane|Place|Terrace|Tce|Parkway|Pde)\b/i;
 const SIZE_REGEX = /(\d[\d,]*)\s*(?:square\s*met(?:er|re)s?|sq\s*\/?\s*m)/i;
 const SQUAT_RACKS_REGEX = /(\d+)\s*Squat\s*racks/i;
+
+/**
+ * Text that carries a gym's address inside a sentence about something else.
+ *
+ * Cockburn's page opens with "A BRAND NEW Cockburn 2.0 is coming on the 7th
+ * October 2026 … until the new club opens." That paragraph contains a street
+ * keyword and a state code, so it scored higher than any real address line and
+ * was stored as the gym's address, with the year 2026 as its postcode. A
+ * candidate carrying this kind of language is an announcement, not an address.
+ */
+const ANNOUNCEMENT_REGEX =
+	/\b(brand new|coming soon|coming on|officially open(?:ed|ing)?|now open|opening|will let you know|until the (?:new|club)|moving across|don'?t miss out|join (?:online|now)|sign up|memberships? (?:from|starting)|we'?re (?:moving|opening|closing)|closed|closing)\b/i;
+
+/** A 4-digit number that is a year in a date ("7th October 2026"), not a postcode. */
+const DATE_YEAR_REGEX =
+	/\b(?:\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?)?(?:January|February|March|April|May|June|July|August|September|October|November|December),?\s+(\d{4})\b/i;
+
+const lastValidPostcode = (text: string, state: string | null): string | null => {
+	const candidates = text.match(/\b\d{4}\b/g) ?? [];
+	const dateYear = DATE_YEAR_REGEX.exec(text)?.[1] ?? null;
+	for (let i = candidates.length - 1; i >= 0; i--) {
+		const candidate = candidates[i];
+		if (candidate === dateYear) continue;
+		if (!postcodeMatchesState(parseInt(candidate, 10), state)) continue;
+		return candidate;
+	}
+	return null;
+};
+
 
 export type GymDetails = {
 	squatRacks: number | null;
@@ -42,15 +73,17 @@ const extractAddress = ($: cheerio.CheerioAPI): { address: string; postcode: num
 		if (text.includes("{") || text.includes(";") || text.includes("function")) return;
 		if (/\S+@\S+\.\S+/.test(text)) return;
 		if (/\bsq\s*\/\s*m\b/i.test(text) || /\bsqm\b/i.test(text)) return;
-
-		// Use the last 4-digit number as the postcode — it's almost always at the end of an address
-		const allPostcodes = text.match(/\b\d{4}\b/g) || [];
-		const postcodeStr = allPostcodes[allPostcodes.length - 1];
-		const postcode = parseInt(postcodeStr, 10);
-		if (postcode < 200 || postcode > 9999) return;
+		// An announcement that happens to name a street is not this gym's address.
+		if (ANNOUNCEMENT_REGEX.test(text)) return;
 
 		const stateMatch = text.match(STATE_REGEX);
 		const state = stateMatch ? stateMatch[1] : null;
+
+		// Use the last 4-digit number as the postcode — it's almost always at the
+		// end of an address — but never a year, and never one outside the state.
+		const postcodeStr = lastValidPostcode(text, state);
+		if (postcodeStr === null) return;
+		const postcode = parseInt(postcodeStr, 10);
 
 		// Prefer candidates that include a state code, a leading street number, and a trailing postcode
 		let score = 0;
@@ -76,16 +109,24 @@ const extractAddress = ($: cheerio.CheerioAPI): { address: string; postcode: num
 };
 
 export const getGymDetails = async (gymName: string): Promise<GymDetails> => {
-	const slug = getSlug(gymName);
-	const url = `https://revofitness.com.au/gyms/${slug}/`;
-
-	const result: GymDetails = {
+	const emptyDetails: GymDetails = {
 		squatRacks: null,
 		address: null,
 		postcode: null,
 		state: null,
 		areaSize: null,
 	};
+
+	// A club Revo no longer publishes has no page of its own, and the name it
+	// would look up belongs to its successor. Returning nothing keeps the stored
+	// metadata instead of copying the new building's size and address onto the
+	// old one. See clubOverrides.ts.
+	if (!hasDetailPage(gymName)) return emptyDetails;
+
+	const slug = getSlug(gymName);
+	const url = `https://revofitness.com.au/gyms/${slug}/`;
+
+	const result: GymDetails = { ...emptyDetails };
 
 	try {
 		const { data } = await axiosGetWithProxyFallback<string>("Details", url, {

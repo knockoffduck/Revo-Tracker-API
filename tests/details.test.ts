@@ -98,6 +98,35 @@ mock.module("axios", () => {
                         `
                     };
                 }
+                 if (url.includes("/cockburn")) {
+                     // The live page: an announcement naming a street, the year in
+                     // the date, and the size in the same breath.
+                     return {
+                         data: `
+                        <html>
+                            <body>
+                                <p>Our BRAND NEW Cockburn club has officially opened! Located at 635 Beeliar Drive , Cockburn WA.</p>
+                                <p>You can still access our original Cockburn club (660 Beeliar Drive). We will let you know when the club is officially closing.</p>
+                                <p>A BRAND NEW Cockburn 2.0 is coming on the 7th October 2026. We are moving across the road to 635 Beeliar Drive, Cockburn WA. You can access our current Cockburn club (660 Beeliar Drive) until the new club opens.</p>
+                                <div><span>2450 sq/m</span></div>
+                                <div><span>13 Squat racks</span></div>
+                            </body>
+                        </html>
+                        `
+                     };
+                 }
+                 if (url.includes("/date-in-prose")) {
+                     return {
+                         data: `
+                        <html>
+                            <body>
+                                <p>Renew your membership before 9 November 2027.</p>
+                                <p>Level 3, 55 Example Road, Perth WA 6000</p>
+                            </body>
+                        </html>
+                        `
+                     };
+                 }
                  if (url.includes("/error-gym")) {
                      throw new Error("404 Not Found");
                  }
@@ -204,5 +233,36 @@ describe("Details Scraper", () => {
         expect(details.address).toBeNull();
         expect(details.postcode).toBeNull();
         expect(details.state).toBeNull();
+    });
+    test("getGymDetails ignores an announcement paragraph that names a street", async () => {
+        // Production stored this paragraph as Cockburn's address, and its "7th
+        // October 2026" as the postcode.
+        const details = await getGymDetails("Cockburn");
+        expect(details.address).toBeNull();
+        expect(details.postcode).toBeNull();
+        expect(details.areaSize).toBe(2450);
+        expect(details.squatRacks).toBe(13);
+    });
+
+    test("getGymDetails does not read a year in prose as the postcode", async () => {
+        const details = await getGymDetails("Date In Prose");
+        expect(details.address).toBe("Level 3, 55 Example Road, Perth WA 6000");
+        expect(details.postcode).toBe(6000);
+    });
+
+    test("getGymDetails does not fetch a page for a gym Revo no longer publishes", async () => {
+        const axios = (await import("axios")).default as any;
+        axios.get.mockClear();
+
+        const details = await getGymDetails("Cockburn (Original)");
+
+        expect(details).toEqual({
+            squatRacks: null,
+            address: null,
+            postcode: null,
+            state: null,
+            areaSize: null,
+        });
+        expect(axios.get).not.toHaveBeenCalled();
     });
 });
