@@ -274,7 +274,7 @@ export const upsertTrendCache = async (
 				.onDuplicateKeyUpdate({
 					set: {
 						trendData,
-						updatedAt,
+						updatedAt: updatedAtSql,
 					},
 				});
 		} catch (err) {
@@ -284,6 +284,29 @@ export const upsertTrendCache = async (
 };
 
 type GymInfo = { id: string; name: string; timezone: string };
+
+/**
+ * One trend run at a time, process-wide.
+ *
+ * The routes used to guard only `/gyms/trends/generate` with a flag of their own, so the
+ * admin SSE endpoint (`/admin/gyms/trends/generate-stream`, which calls runTrendAgent
+ * directly) could start a second run alongside it. Two runs over the same gym overlap in
+ * `upsertTrendCache` (read-then-create with no unique index in PocketBase), so they can
+ * duplicate cache rows and double the load on a job that already scans 90 days per gym.
+ */
+let trendRunActive = false;
+
+const claimTrendRun = (): boolean => {
+	if (trendRunActive) return false;
+	trendRunActive = true;
+	return true;
+};
+
+const releaseTrendRun = (): void => {
+	trendRunActive = false;
+};
+
+const ALREADY_RUNNING = "Trend generation already in progress";
 
 /**
  * Processes trend data for a single gym and upserts all 7 days into the cache.
@@ -333,6 +356,11 @@ export const generateTrendsForGyms = async (
 
 	console.log(`[TrendAgent] Generating trends for ${ids.length} gym(s) with ${lookbackDays}-day lookback...`);
 
+	if (!claimTrendRun()) {
+		console.warn(`[TrendAgent] ${ALREADY_RUNNING} — refusing the selected-gym run`);
+		return { success: false, gymsProcessed: 0, errors: [ALREADY_RUNNING] };
+	}
+
 	try {
 		await ensureAdminAuth();
 		const filter = ids.map((id) => `id='${id}'`).join(" || ");
@@ -368,6 +396,8 @@ export const generateTrendsForGyms = async (
 		const result: TrendRunResult = { success: false, gymsProcessed, errors: [String(error)] };
 		await reportTrendRun(`selected gyms (${ids.length})`, result, error);
 		return result;
+	} finally {
+		releaseTrendRun();
 	}
 };
 
@@ -381,6 +411,11 @@ export const runTrendAgent = async (
 
 	const errors: string[] = [];
 	let gymsProcessed = 0;
+
+	if (!claimTrendRun()) {
+		console.warn(`[TrendAgent] ${ALREADY_RUNNING} — refusing the full run`);
+		return { success: false, gymsProcessed: 0, errors: [ALREADY_RUNNING] };
+	}
 
 	try {
 		// Step 1: Fetch list of all gyms
@@ -412,6 +447,8 @@ export const runTrendAgent = async (
 		const result: TrendRunResult = { success: false, gymsProcessed, errors: [String(error)] };
 		await reportTrendRun(`all gyms (lookback ${lookbackDays}d)`, result, error);
 		return result;
+	} finally {
+		releaseTrendRun();
 	}
 };
 
