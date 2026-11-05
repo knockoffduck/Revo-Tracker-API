@@ -7,6 +7,21 @@ const POCKETBASE_URL = process.env.POCKETBASE_URL ?? "https://pb.dvcklab.work";
 export const pb = new PocketBase(POCKETBASE_URL);
 
 /**
+ * Turn off the SDK's per-request auto-cancellation.
+ *
+ * The SDK keys in-flight aborts on `method + path` only (query string excluded), so any
+ * second request to the same collection from this process aborts the first one — the
+ * victim throws `ClientResponseError 0: The request was aborted`. That is harmless in a
+ * browser, where a newer request is always the one you want, but this process is a server:
+ * one shared client serves the 5-minute scrape, the site's reads AND the trend agent's
+ * multi-minute paged scans. A page view landing mid-run used to kill the run's in-flight
+ * page fetch, failing a handful of gyms at random ("8 of 84 gyms").
+ *
+ * Nothing here ever cancels deliberately, so there is no behaviour to preserve.
+ */
+pb.autoCancellation(false);
+
+/**
  * Drop the cached superuser token so the next `ensureAdminAuth()` authenticates
  * again from `POCKETBASE_ADMIN_*`.
  *

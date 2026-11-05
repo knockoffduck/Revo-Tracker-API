@@ -11,7 +11,7 @@
  * Optimization: Batch processing per gym to reduce memory usage and query load.
  */
 
-import { pb, ensureAdminAuth } from "../utils/database";
+import { pb, ensureAdminAuth, toSqlDate } from "../utils/database";
 import { sqlDb } from "../db/database";
 import { gymTrendCache } from "../db/schema";
 import { resolveAlert, sendAlert } from "../utils/alerts";
@@ -239,6 +239,9 @@ export const upsertTrendCache = async (
 ): Promise<void> => {
 	const now = new Date();
 	const updatedAt = now.toISOString();
+	// MySQL `DATETIME` rejects the ISO form ("2026-11-05T18:38:43.856Z" → errno 1292, "Incorrect
+	// datetime value"), so the dual write below needs the SQL form; PocketBase keeps the ISO one.
+	const updatedAtSql = toSqlDate(now);
 
 	await ensureAdminAuth();
 	const existing = await pb.collection("gym_trend_cache").getList(1, 1, {
@@ -266,7 +269,7 @@ export const upsertTrendCache = async (
 					gymId,
 					dayOfWeek,
 					trendData,
-					updatedAt,
+					updatedAt: updatedAtSql,
 				})
 				.onDuplicateKeyUpdate({
 					set: {
