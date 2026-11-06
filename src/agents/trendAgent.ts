@@ -12,7 +12,7 @@
  */
 
 import { pb, ensureAdminAuth, toSqlDate } from "../utils/database";
-import { sqlDb } from "../db/database";
+import { isSqlMirrorEnabled, noteSqlMirrorError, sqlDb } from "../db/database";
 import { gymTrendCache } from "../db/schema";
 import { resolveAlert, sendAlert } from "../utils/alerts";
 
@@ -261,7 +261,7 @@ export const upsertTrendCache = async (
 		await pb.collection("gym_trend_cache").create(payload);
 	}
 
-	if (sqlDb) {
+	if (sqlDb && isSqlMirrorEnabled()) {
 		try {
 			await sqlDb
 				.insert(gymTrendCache)
@@ -279,6 +279,9 @@ export const upsertTrendCache = async (
 				});
 		} catch (err) {
 			console.error(`[TrendAgent] MySQL trend cache write failed for ${gymId}/${dayOfWeek}:`, err);
+			// Unreachable or rejected credentials would otherwise cost a TCP timeout per
+			// write, 7 per gym, for the whole run.
+			noteSqlMirrorError(err);
 		}
 	}
 };

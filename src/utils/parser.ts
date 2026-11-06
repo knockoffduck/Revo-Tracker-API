@@ -3,7 +3,7 @@ import { ClientResponseError } from "pocketbase";
 import { GymInfo } from "./types";
 import { file } from "bun";
 import { pb, ensureAdminAuth, invalidateAdminAuth, toPbDate, toSqlDate } from "./database";
-import { sqlDb } from "../db/database";
+import { isSqlMirrorEnabled, noteSqlMirrorError, sqlDb } from "../db/database";
 import { revoGyms, revoGymCount } from "../db/schema";
 import { readString, simpleIntegerHash } from "./tools";
 import { normalizeGymName, filterTrackableClubs, gymRecordScore, resolveTimezone } from "./gymFilter";
@@ -462,7 +462,7 @@ const insertGymStatsSql = async (
 	gymList: PbGym[],
 	missingGyms: PbGym[]
 ) => {
-	if (!sqlDb) return;
+	if (!sqlDb || !isSqlMirrorEnabled()) return;
 
 	try {
 		const sqlTime = toSqlDate(new Date(currentTime));
@@ -505,6 +505,7 @@ const insertGymStatsSql = async (
 		await resolveAlert("mysql.write");
 	} catch (err) {
 		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym stats write failed:`, err);
+		noteSqlMirrorError(err);
 		await sendAlert({
 			key: "mysql.write",
 			severity: "warning",
@@ -517,7 +518,7 @@ const insertGymStatsSql = async (
 };
 
 const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList: PbGym[]) => {
-	if (!sqlDb) return;
+	if (!sqlDb || !isSqlMirrorEnabled()) return;
 
 	try {
 		const sqlTime = toSqlDate(new Date(currentTime));
@@ -563,6 +564,7 @@ const updateGymInfoSql = async (gymData: GymInfo[], currentTime: string, gymList
 		}
 	} catch (err) {
 		console.error(`${STAGE.DB} ${STAGE.FAIL} MySQL gym info write failed:`, err);
+		noteSqlMirrorError(err);
 		await sendAlert({
 			key: "mysql.write",
 			severity: "warning",
